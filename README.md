@@ -4,7 +4,7 @@ This [will be] the code for the ICCV 2025 paper ["STaR: Seamless Spatial-Tempora
 
  > 🚀 **Update:** The code will be released soon—stay tuned! 👀
 
-![Architecture Details](assets/detail.png)
+![Architecture Details](assets/detail_dark.png)
 
 ## Citation                                                                                                                                                  
 If you find this work helpful, please consider citing it as follows:
