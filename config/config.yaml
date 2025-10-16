@@ -1,0 +1,96 @@
+work_dir: ./work_dir/train_release/
+mesh_path: ./datasets/mixamo/new_train_shape_uv/
+texture_path: ./datasets/mixamo/texture_datapath/
+model_save_name: star
+device: [0]
+seed: 42
+description: This is the training process of STaR.
+wandb_tags: ['STaR']
+
+max_length: 60
+num_joints: 22
+kp: 0.8
+margin: 0.3
+
+train_set: datasets.train_set_for_pub.Feeder
+train_set_args:
+  source_path: ./datasets/mixamo/test_source/
+  q_path: ./datasets/mixamo/train_q/
+  stats_path: ./datasets/mixamo/stats/
+  shape_path: ./datasets/mixamo/new_train_shape/
+  max_length: 60
+
+test_set: datasets.test_set_for_pub.Feeder
+test_set_args:
+  test_pairs: ./datasets/mixamo/test.json
+  source_path: ./datasets/mixamo/test_source/
+  q_path: ./datasets/mixamo/test_q/
+  stats_path: ./datasets/mixamo/stats/
+  shape_path: ./datasets/mixamo/test_shape/
+  min_steps: 120
+  max_steps: 120
+
+inference_set: datasets.inference_set_for_pub.Feeder
+inference_set_args:
+  test_pairs: ./datasets/mixamo/inference.json
+  source_path: ./datasets/mixamo/inference_source/
+  q_path: ./datasets/mixamo/inference_q/
+  stats_path: ./datasets/mixamo/stats/
+  shape_path: ./datasets/mixamo/test_shape/
+  min_steps: 120
+  max_steps: 120
+
+model_path: src.model_for_pub
+model_name: Retarget_Model
+optimize_param:
+  - delta_shape_dec
+
+model_args:
+  num_joint: 22
+  num_frame: 60
+  token_channels: 64
+  hidden_channels: 64
+  embed_channels: 32
+  kp: 0.8
+
+loss_function: Loss
+loss_args:
+  joint_vector_loss: 1.0
+  temporal_loss: 1.0
+  constrain_loss: 0.01
+  twist_constrain_loss: 10.0
+  new_geometric_loss:
+    - 10.0   # repulsive
+    - 0.0   # attractive
+alpha: 100
+euler_order: yzx
+
+scale_info_path: ./datasets/mixamo/scale_info/
+hand_vert_num: 200
+limb_vert_num: 300
+wo_limb_vert_num: 4000
+
+test_weights:
+test_ignore_weights: []
+
+encoding_model: Pct
+encoding_model_args:
+  dropout: 0.5
+  output_channels: 40
+encoding_model_weights: datasets/mixamo/encoding_model_weights/model.t7
+
+epoch: 50
+global_epoch: 50
+save_epoch: 5
+step: [30]
+global_step: [30]
+base_lr: 0.001
+stage2_lr_scale: 0.5
+global_lr: 0.001
+batch_size: 16
+test_k: 0.8
+test_batch_size: 64
+weight_decay: 0.0
+ret_weights:
+dis_weights:
+ignore_weights: []
