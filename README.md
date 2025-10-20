@@ -43,7 +43,7 @@ pip install ./pointnet2_ops_lib/.
 
 ## Test
 
-Download the processed test set from [here](). Put all content under ```./datasets/mixamo/```
+Download the processed test set from [here](https://drive.google.com/drive/folders/1DFx-JhjPzE4njujtRWxGRSfl2m0NFU8f?usp=drive_link). Put all content under ```./datasets/mixamo/```
 
 ```
 python test.py --config ./config/test_config.yaml
