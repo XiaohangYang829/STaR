@@ -1,40 +1,26 @@
 import os
 import sys
-import time
-import trimesh
 import importlib
 import numpy as np
-import pyvista as pv
-from scipy.spatial import cKDTree
 from collections import OrderedDict
-from sdf import SDF, SDF2
-from torch_kdtree import build_kd_tree, gpu_available
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch import atan2, asin
 
-import matplotlib
-import matplotlib.pyplot as plt
-from mpl_toolkits.mplot3d import Axes3D
-from matplotlib.animation import FuncAnimation
+from method.forward_kinematics import FK
+from method.linear_blend_skin import batch_linear_blend_skinning_wo_rootquat
+from method.ops import q_mul_q
+from method.point_module import sample_and_group, Point_Transformer_Last, Local_op
 
-from src.forward_kinematics import FK
-from src.linear_blend_skin import linear_blend_skinning, linear_blend_skinning_old,\
-                                  linear_blend_skinning_wo_rootquat, batch_linear_blend_skinning_wo_rootquat
-from src.ops import qlinear, q_mul_q
-from src.utils import random_point_select_torch
-from src.sdf_module import SingleBVPNet
-from src.point_module import sample_and_group, Point_Transformer_Last, Local_op
-
-sys.path.append("./outside-code")
+sys.path.append("./submodules")
 try:
-    from ChamferDistancePytorch.chamfer3D_Mine import dist_chamfer_3D as dist_chamfer_3D_Mine
-    cham3D = dist_chamfer_3D_Mine.chamfer_3DDist_Mine()
-except:
-    print("Loading chamfer_python")
-    from ChamferDistancePytorch.chamfer_python import distChamfer_a2b as cham3D
+    from ChamferDistancePytorch.Adapted_ChamferDistance import ChamferDistance
+    ChamDist = ChamferDistance.chamfer_distance()
+except Exception as e:
+    print("Loading another chamfer distance.", e)
+    from ChamferDistancePytorch.chamfer_python import distChamfer_a2b as ChamDist
 
 
 class Attention(nn.Module):
@@ -565,7 +551,7 @@ def allinone_sdf_loss(
     vertices_lefthand = vertices_lbs[:, :, :hand_num]
     vertices_wo_leftarm = vertices_lbs[:, :, hand_num*2+limb_num : hand_num*2+limb_num+wo_limb_num].detach()
     normals_wo_leftarm = normals_lbs[:, :, hand_num*2+limb_num : hand_num*2+limb_num+wo_limb_num].detach()
-    _, min_query = cham3D(vertices_lefthand.view(-1, hand_num, 3), vertices_wo_leftarm.view(-1, wo_limb_num, 3))
+    _, min_query = ChamDist(vertices_lefthand.view(-1, hand_num, 3), vertices_wo_leftarm.view(-1, wo_limb_num, 3))
     expanded_min_indexes = min_query.view(bs, T, hand_num).long().unsqueeze(-1).expand(-1, -1, -1, 3)
     refer_vector_lefthand = torch.gather(vertices_wo_leftarm, dim=2, index=expanded_min_indexes) - vertices_lefthand
     refer_normals_lefthand = torch.gather(normals_wo_leftarm, dim=2, index=expanded_min_indexes)
@@ -575,7 +561,7 @@ def allinone_sdf_loss(
     vertices_righthand = vertices_lbs[:, :, hand_num : hand_num*2]
     vertices_wo_rightarm = vertices_lbs[:, :, hand_num*2+limb_num*2+wo_limb_num : hand_num*2+limb_num*2+wo_limb_num*2].detach()
     normals_wo_tightarm = normals_lbs[:, :, hand_num*2+limb_num*2+wo_limb_num : hand_num*2+limb_num*2+wo_limb_num*2].detach()
-    _, min_query = cham3D(vertices_righthand.view(-1, hand_num, 3), vertices_wo_rightarm.view(-1, wo_limb_num, 3))
+    _, min_query = ChamDist(vertices_righthand.view(-1, hand_num, 3), vertices_wo_rightarm.view(-1, wo_limb_num, 3))
     expanded_min_indexes = min_query.view(bs, T, hand_num).long().unsqueeze(-1).expand(-1, -1, -1, 3)
     refer_vector_righthand = torch.gather(vertices_wo_rightarm, dim=2, index=expanded_min_indexes) - vertices_righthand
     refer_normals_righthand = torch.gather(normals_wo_tightarm, dim=2, index=expanded_min_indexes)
@@ -585,11 +571,11 @@ def allinone_sdf_loss(
     # get the distances & find the nearest neighbor
     # leftarm
     # visualize_pointcloud(vertices_leftarm.detach().cpu().numpy(), vertices_wo_leftarm[0].detach().cpu().numpy(), scale=True)
-    # mydist1, mydist2, min_query, idx2 = cham3D(vertices_leftarm, vertices_wo_leftarm)
+    # mydist1, mydist2, min_query, idx2 = ChamDist(vertices_leftarm, vertices_wo_leftarm)
     vertices_leftarm = vertices_lbs[:, :, hand_num*2 : hand_num*2+limb_num]
     vertices_wo_leftarm = vertices_lbs[:, :, hand_num*2+limb_num : hand_num*2+limb_num+wo_limb_num].detach()
     normals_wo_leftarm = normals_lbs[:, :, hand_num*2+limb_num : hand_num*2+limb_num+wo_limb_num].detach()
-    _, min_query = cham3D(vertices_leftarm.view(-1, limb_num, 3), vertices_wo_leftarm.view(-1, wo_limb_num, 3))
+    _, min_query = ChamDist(vertices_leftarm.view(-1, limb_num, 3), vertices_wo_leftarm.view(-1, wo_limb_num, 3))
     expanded_min_indexes = min_query.view(bs, T, limb_num).long().unsqueeze(-1).expand(-1, -1, -1, 3)
     refer_vector_leftarm = torch.gather(vertices_wo_leftarm, dim=2, index=expanded_min_indexes) - vertices_leftarm
     refer_normals_leftarm = torch.gather(normals_wo_leftarm, dim=2, index=expanded_min_indexes)
@@ -602,11 +588,11 @@ def allinone_sdf_loss(
         filtered_sdfloss_leftarm = torch.sum(torch.clamp(sdf_vector_multiply_leftarm, min=0)) / bs / T / limb_num
 
     # rightarm
-    # mydist1, mydist2, min_query, idx2 = cham3D(vertices_rightarm, vertices_wo_rightarm)
+    # mydist1, mydist2, min_query, idx2 = ChamDist(vertices_rightarm, vertices_wo_rightarm)
     vertices_rightarm = vertices_lbs[:, :, hand_num*2+limb_num+wo_limb_num : hand_num*2+limb_num*2+wo_limb_num]
     vertices_wo_rightarm = vertices_lbs[:, :, hand_num*2+limb_num*2+wo_limb_num : hand_num*2+limb_num*2+wo_limb_num*2].detach()
     normals_wo_rightarm = normals_lbs[:, :, hand_num*2+limb_num*2+wo_limb_num : hand_num*2+limb_num*2+wo_limb_num*2].detach()
-    _, min_query = cham3D(vertices_rightarm.view(-1, limb_num, 3), vertices_wo_rightarm.view(-1, wo_limb_num, 3))
+    _, min_query = ChamDist(vertices_rightarm.view(-1, limb_num, 3), vertices_wo_rightarm.view(-1, wo_limb_num, 3))
     expanded_min_indexes = min_query.view(bs, T, limb_num).long().unsqueeze(-1).expand(-1, -1, -1, 3)
     refer_vector_rightarm = torch.gather(vertices_wo_rightarm, dim=2, index=expanded_min_indexes) - vertices_rightarm
     refer_normals_rightarm = torch.gather(normals_wo_rightarm, dim=2, index=expanded_min_indexes)
@@ -619,11 +605,11 @@ def allinone_sdf_loss(
         filtered_sdfloss_rightarm = torch.sum(torch.clamp(sdf_vector_multiply_rightarm, min=0)) / bs / T / limb_num
 
     # leftleg
-    # mydist1, mydist2, min_query, idx2 = cham3D(vertices_leftleg, vertices_wo_leftleg)
+    # mydist1, mydist2, min_query, idx2 = ChamDist(vertices_leftleg, vertices_wo_leftleg)
     vertices_leftleg = vertices_lbs[:, :, hand_num*2+limb_num*2+wo_limb_num*2 : hand_num*2+limb_num*3+wo_limb_num*2]
     vertices_wo_leftleg = vertices_lbs[:, :, hand_num*2+limb_num*3+wo_limb_num*2 : hand_num*2+limb_num*3+wo_limb_num*3].detach()
     normals_wo_leftleg = normals_lbs[:, :, hand_num*2+limb_num*3+wo_limb_num*2 : hand_num*2+limb_num*3+wo_limb_num*3].detach()
-    _, min_query = cham3D(vertices_leftleg.view(-1, limb_num, 3), vertices_wo_leftleg.view(-1, wo_limb_num, 3))
+    _, min_query = ChamDist(vertices_leftleg.view(-1, limb_num, 3), vertices_wo_leftleg.view(-1, wo_limb_num, 3))
     expanded_min_indexes = min_query.view(bs, T, limb_num).long().unsqueeze(-1).expand(-1, -1, -1, 3)
     refer_vector_leftleg = torch.gather(vertices_wo_leftleg, dim=2, index=expanded_min_indexes) - vertices_leftleg
     refer_normals_leftleg = torch.gather(normals_wo_leftleg, dim=2, index=expanded_min_indexes)
@@ -636,11 +622,11 @@ def allinone_sdf_loss(
         filtered_sdfloss_leftleg = torch.sum(torch.clamp(sdf_vector_multiply_leftleg, min=0)) / bs / T / limb_num
 
     # rightleg
-    # mydist1, mydist2, min_query, idx2 = cham3D(vertices_rightleg, vertices_wo_rightleg)
+    # mydist1, mydist2, min_query, idx2 = ChamDist(vertices_rightleg, vertices_wo_rightleg)
     vertices_rightleg = vertices_lbs[:, :, hand_num*2+limb_num*3+wo_limb_num*3 : hand_num*2+limb_num*4+wo_limb_num*3]
     vertices_wo_rightleg = vertices_lbs[:, :, hand_num*2+limb_num*4+wo_limb_num*3 : hand_num*2+limb_num*4+wo_limb_num*4].detach()
     normals_wo_rightleg = normals_lbs[:, :, hand_num*2+limb_num*4+wo_limb_num*3 : hand_num*2+limb_num*4+wo_limb_num*4].detach()
-    _, min_query = cham3D(vertices_rightleg.view(-1, limb_num, 3), vertices_wo_rightleg.view(-1, wo_limb_num, 3))
+    _, min_query = ChamDist(vertices_rightleg.view(-1, limb_num, 3), vertices_wo_rightleg.view(-1, wo_limb_num, 3))
     expanded_min_indexes = min_query.view(bs, T, limb_num).long().unsqueeze(-1).expand(-1, -1, -1, 3)
     refer_vector_rightleg = torch.gather(vertices_wo_rightleg, dim=2, index=expanded_min_indexes) - vertices_rightleg
     refer_normals_rightleg = torch.gather(normals_wo_rightleg, dim=2, index=expanded_min_indexes)

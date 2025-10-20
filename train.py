@@ -31,14 +31,14 @@ if torch.cuda.is_available():
 else:
     os.environ['TORCH_CUDA_ARCH_LIST'] = "7.5+PTX"
 
-from model.ops import get_wjs
-from model.utils import import_str, load_model_w_dis, print_log_txt, AverageMeter, init_seed, put_in_world, get_height, random_point_select_torch
-from model.metric import penetrate_r2et, penetrate_1, curvature_1, curvature_2
+from method.ops import get_wjs
+from method.utils import import_str, load_model_w_dis, print_log_txt, AverageMeter, init_seed, put_in_world, get_height, random_point_select_torch
+from method.metric import penetrate_1, curvature_1, curvature_2
 
 
 def get_parser():
     parser = argparse.ArgumentParser(description='motion retargeting')
-    parser.add_argument('--config', default='./config/6_motionnet.yaml', help='path to the configuration file')
+    parser.add_argument('--config', default='./config/config.yaml', help='path to the configuration file')
     return parser
 
 

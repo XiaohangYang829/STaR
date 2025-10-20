@@ -1,10 +1,10 @@
-work_dir: ./work_dir/train_release/
+work_dir: ./work_dir/paper_version/
 mesh_path: ./datasets/mixamo/shape/
 texture_path: ./datasets/mixamo/texture_datapath/
-model_save_name: star
+model_save_name: retarget_model
 device: [0]
 seed: 42
-description: This is the training process of STaR.
+description: This is the testing process of STaR.
 wandb_tags: ['STaR']
 
 max_length: 60
@@ -12,13 +12,13 @@ num_joints: 22
 kp: 0.8
 margin: 0.3
 
-train_set: datasets.train_set.Feeder
-train_set_args:
-  source_path: ./datasets/mixamo/train_source/
-  q_path: ./datasets/mixamo/train_q/
-  stats_path: ./datasets/mixamo/stats/
-  shape_path: ./datasets/mixamo/new_train_shape/
-  max_length: 60
+# train_set: datasets.train_set.Feeder
+# train_set_args:
+#   source_path: ./datasets/mixamo/train_source/
+#   q_path: ./datasets/mixamo/train_q/
+#   stats_path: ./datasets/mixamo/stats/
+#   shape_path: ./datasets/mixamo/new_train_shape/
+#   max_length: 60
 
 test_set: datasets.test_set.Feeder
 test_set_args:
@@ -26,7 +26,7 @@ test_set_args:
   test_data_path: ./datasets/mixamo/test_data.npy
   stats_path: ./datasets/mixamo/stats/
   shape_path: ./datasets/mixamo/test_shape/
-  min_steps: 120
+  min_steps: 120  # double the length to test the model
   max_steps: 120
 
 # inference_set: datasets.inference_set.Feeder
@@ -69,7 +69,7 @@ hand_vert_num: 200
 limb_vert_num: 300
 wo_limb_vert_num: 4000
 
-test_weights:
+test_weights: retarget_model.pt
 test_ignore_weights: []
 
 encoding_model: Pct

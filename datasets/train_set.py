@@ -7,7 +7,7 @@ from torch.utils.data import Dataset
 from os import listdir, makedirs
 from os.path import exists, join
 
-sys.path.append("./src")
+sys.path.append("./method")
 from utils import get_height_from_skel
 from forward_kinematics import FK_NP
 from utils import put_in_world

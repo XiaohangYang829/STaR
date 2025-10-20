@@ -11,13 +11,13 @@ from scipy import stats
 from collections import OrderedDict
 from torch.utils.data import Dataset
 
-sys.path.append("./outside-code")
+sys.path.append("./submodules")
 import BVH as BVH
 import Animation as Animation
 from Pivots import Pivots
 from Quaternions import Quaternions
 
-sys.path.append("./src")
+sys.path.append("./method")
 from utils import softmin, get_height
 from ops import qlinear, q_mul_q, q_div_q
 

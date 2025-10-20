@@ -208,5 +208,6 @@ __marimo__/
 
 
 # ours
-.datasets/mixamo/
-.datasets/other_dataset/
+datasets/mixamo/
+datasets/other_dataset/
+.vscode/

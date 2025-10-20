@@ -11,22 +11,17 @@ import numpy as np
 import scipy.ndimage.filters as filters
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
-import matplotlib.colors as colors
 import matplotlib.patheffects as pe
-from matplotlib.animation import ArtistAnimation
-from mpl_toolkits.mplot3d import Axes3D
-from os import listdir, makedirs, system
-from os.path import isdir
+from os import listdir
 
 from scipy.sparse import csr_matrix
 from scipy.sparse.csgraph import dijkstra
 
-sys.path.append("./outside-code")
+sys.path.append("./submodules")
 sys.path.append("./")
 import Animation as Animation
 import BVH as BVH
 from Quaternions import Quaternions
-from src.ops import q_mul_q
 
 
 class AverageMeter(object):
@@ -727,12 +722,10 @@ def load_test_model(ret_model, arg):
         print_log_txt(f'Loading ret weights from {arg.test_weights}', arg.work_dir)
         ret_weights = torch.load(join(arg.work_dir, arg.test_weights))
 
-        ret_weights = OrderedDict(
-            [
-                [k.split('module.')[-1], v.cuda(output_device)]
-                for k, v in ret_weights.items()
-            ]
-        )
+        ret_weights = OrderedDict([
+            [k.split('module.')[-1], v.cuda(output_device)]
+            for k, v in ret_weights.items()
+        ])
 
         pop_lst = []
         for k in ret_weights.keys():
@@ -757,13 +750,11 @@ def load_test_model(ret_model, arg):
 
 def random_point_dropout(pc, max_dropout_ratio=0.875):
     ''' batch_pc: BxNx3 '''
-    # for b in range(batch_pc.shape[0]):
-    dropout_ratio = np.random.random()*max_dropout_ratio # 0~0.875    
+    dropout_ratio = np.random.random()*max_dropout_ratio 
     drop_idx = np.where(np.random.random((pc.shape[0]))<=dropout_ratio)[0]
-    # print ('use random drop', len(drop_idx))
 
     if len(drop_idx)>0:
-        pc[drop_idx,:] = pc[0,:] # set to the first point
+        pc[drop_idx,:] = pc[0,:]
     return pc
 
 
