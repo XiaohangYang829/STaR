@@ -8,7 +8,8 @@ Neural motion retargeting model, STaR, is designed for a balance between: (1) mo
 
 - [x] test code, with network weight and a processed test set;
 - [ ] inference code, with a PyTorch3D-based rendering function;
-- [ ] data preparation, and train code;
+- [ ] data preparation;
+- [ ] release a skel2mesh motion retargeting sub-model based on STaR, which can be used for retargeting motion generation results to new characters;
 
 ![Architecture Details](assets/detail_dark.png)
 
@@ -23,7 +24,7 @@ conda activate star
 
 ### 2. Install main dependencies
 
-* **Install [PyTorch](https://pytorch.org/get-started/previous-versions/). We have tested on PyTorch 2.3.1, ...**
+* **Install [PyTorch](https://pytorch.org/get-started/previous-versions/). We have tested on PyTorch 2.3.1**.
 
 ```
 conda install pytorch==2.3.1 torchvision==0.18.1 torchaudio==2.3.1 pytorch-cuda=11.8 -c pytorch -c nvidia
@@ -51,19 +52,30 @@ python test.py --config ./config/test_config.yaml
 
 ## Data Preparation (TODO)
 
-(We use scripts to download, match motion instances and create datesets. This part is a little bit complicated, we will release this part as soon as possible, together with a processed version.)
+(We use scripts to download, match motion instances and create datesets. This part is a little bit complicated, we will release this part as soon as possible, together with a pre-processed version.)
 
-## Inference (TODO)
+## Inference and Visualisation (TODO)
 
 ```
 python inference.py --config ./config/config.yaml
 ```
 
-## Train (TODO)
+## Train
 
 ```
 python train.py --config ./config/config.yaml
 ```
+
+## Acknowledgments
+The code is partially built based on [R2ET](https://github.com/Kebii/R2ET).
+
+The dataset is taken from [Adobe Mixamo](https://www.mixamo.com/).
+
+The Chamfer Distance is adapted from [ChamferDistancePytorch](https://github.com/ThibaultGROUEIX/ChamferDistancePytorch).
+
+The shape encoder and PointNet2_lib is adapted from [PCT](https://github.com/Strawberry-Eat-Mango/PCT_Pytorch).
+
+Thanks to all of them.
 
 ## Citation
 If you find this work helpful, please consider citing it as follows:
