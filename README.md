@@ -1,4 +1,4 @@
-# \[WIP\] STaR: Seamless Spatial-Temporal Aware Motion Retargeting with Penetration and Consistency Constraints
+# \[ICCV 2025\] STaR: Seamless Spatial-Temporal Aware Motion Retargeting with Penetration and Consistency Constraints
 
 This is the code for the ICCV 2025 paper ["STaR: Seamless Spatial-Temporal Aware Motion Retargeting with Penetration and Consistency Constraints"](https://arxiv.org/abs/2504.06504), by Xiaohang Yang, et al.
 
@@ -80,13 +80,12 @@ Thanks to all of them.
 ## Citation
 If you find this work helpful, please consider citing it as follows:
 ```   
-@misc{yang2025starseamlessspatialtemporalaware,
-      title={STaR: Seamless Spatial-Temporal Aware Motion Retargeting with Penetration and Consistency Constraints}, 
-      author={Xiaohang Yang and Qing Wang and Jiahao Yang and Gregory Slabaugh and Shanxin Yuan},
-      year={2025},
-      eprint={2504.06504},
-      archivePrefix={arXiv},
-      primaryClass={cs.CV},
-      url={https://arxiv.org/abs/2504.06504}, 
+@InProceedings{Yang_2025_STaR,
+    author    = {Yang, Xiaohang and Wang, Qing and Yang, Jiahao and Slabaugh, Gregory and Yuan, Shanxin},
+    title     = {STaR: Seamless Spatial-Temporal Aware Motion Retargeting with Penetration and Consistency Constraints},
+    booktitle = {Proceedings of the IEEE/CVF International Conference on Computer Vision (ICCV)},
+    month     = {Oct},
+    year      = {2025}
 }
+
 ```
