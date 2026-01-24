@@ -128,6 +128,8 @@ STaR/
 
 ## Test
 
+We have include the weights in this repository, the weight path is ```./work_dir/paper_version/retarget_model.pt```.
+
 ```
 python test.py --config ./config/test_config.yaml
 ```
