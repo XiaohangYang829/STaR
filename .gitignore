@@ -211,3 +211,7 @@ __marimo__/
 datasets/mixamo/
 datasets/other_dataset/
 .vscode/
+submodules/ChamferDistancePytorch/tmp/
+render_dir/paper_version/ours/
+render_dir/paper_version/copy/
+render_dir/paper_version/source/

@@ -1,6 +1,8 @@
 import os
 import sys
 import json
+from typing import Any
+from pyparsing.core import ParseSyntaxException
 import torch
 import numpy as np
 import matplotlib.pyplot as plt
@@ -24,12 +26,13 @@ from ops import qlinear, q_mul_q, q_div_q
 
 class Feeder(Dataset):
     def __init__(
-        self, test_pairs, source_path, q_path, stats_path, shape_path, min_steps, max_steps, is_h36m=False
+        self, inference_pairs, inference_data_path, source_path, q_path, stats_path, shape_path, min_steps, max_steps, is_h36m=False
     ):
-        with open(test_pairs, "r") as json_file:
+        with open(inference_pairs, "r") as json_file:
             self.test_pairs = json.load(json_file)
 
         # store base config
+        self.inference_data_path = inference_data_path
         self.source_path = source_path
         self.q_path = q_path
         self.stats_path = stats_path
@@ -83,253 +86,322 @@ class Feeder(Dataset):
 
     def load_data(self):
 
-        input_local = []
-        input_global = []
-        input_joints = []
-        input_animation = []
-        input_skel = []
-        input_quat = []
+        if self.inference_data_path is None:
 
-        target_data = []
-        target_joints = []
-        target_animation = []
-        target_skel = []
-        target_quat = []
-        animation_gt = []
+            input_local = []
+            input_global = []
+            input_joints = []
+            input_animation = []
+            input_skel = []
+            input_quat = []
 
-        from_name = []
-        to_name = []
-        from_shape_name = []
-        to_shape_name = []
+            target_data = []
+            target_joints = []
+            target_animation = []
+            target_skel = []
+            target_quat = []
+            animation_gt = []
 
-        input_gt = []
-        target_gt = []
-        inp_bvh_path = []
-        tgt_bvh_path = []
-        inp_shape_path = []
-        tgt_shape_path = []
+            from_name = []
+            to_name = []
+            from_shape_name = []
+            to_shape_name = []
 
-        test_types = []
+            input_gt = []
+            target_gt = []
+            inp_bvh_path = []
+            tgt_bvh_path = []
+            inp_shape_path = []
+            tgt_shape_path = []
 
-        joints_list = [
-            "Spine",
-            "Spine1",
-            "Spine2",
-            "Neck",
-            "Head",
-            "LeftUpLeg",
-            "LeftLeg",
-            "LeftFoot",
-            "LeftToeBase",
-            "RightUpLeg",
-            "RightLeg",
-            "RightFoot",
-            "RightToeBase",
-            "LeftShoulder",
-            "LeftArm",
-            "LeftForeArm",
-            "LeftHand",
-            "RightShoulder",
-            "RightArm",
-            "RightForeArm",
-            "RightHand",
-        ]
+            test_types = []
 
-        total_count = 0
-        self.cut_list = []
+            motion_names = []
 
-        for dic in self.test_pairs:
-            try:
-                # some errors in character names: Aj and AJ
-                inp = dic['source_character'].replace(' ', '_').replace('aj', 'AJ')
-                tgt = dic['target_character'].replace(' ', '_').replace('aj', 'AJ')
+            joints_list = [
+                "Spine",
+                "Spine1",
+                "Spine2",
+                "Neck",
+                "Head",
+                "LeftUpLeg",
+                "LeftLeg",
+                "LeftFoot",
+                "LeftToeBase",
+                "RightUpLeg",
+                "RightLeg",
+                "RightFoot",
+                "RightToeBase",
+                "LeftShoulder",
+                "LeftArm",
+                "LeftForeArm",
+                "LeftHand",
+                "RightShoulder",
+                "RightArm",
+                "RightForeArm",
+                "RightHand",
+            ]
 
-                # prepare filenames
-                inp_fbx_file = join(self.source_path, inp, dic['source_motion_file'])
-                inp_bvh_file = inp_fbx_file.replace('fbx', 'bvh')
-                inp_skel_file = join(self.q_path, inp, dic['source_motion_file']).replace('.fbx', '_skel.npy')
-                inp_seq_file = inp_skel_file.replace('_skel', '_seq')
-                inp_quat_file = inp_skel_file.replace('_skel', '_quat')
-                inp_shape_file = join(self.shape_path, inp + '.npz')
-                
-                tgt_fbx_file = join(self.source_path, tgt, dic['target_motion_file'])
-                tgt_bvh_file = tgt_fbx_file.replace('fbx', 'bvh')
-                tgt_skel_file = join(self.q_path, tgt, dic['target_motion_file']).replace('.fbx', '_skel.npy')
-                tgt_seq_file = tgt_skel_file.replace('_skel', '_seq')
-                tgt_quat_file = tgt_skel_file.replace('_skel', '_quat')
-                tgt_shape_file = join(self.shape_path, tgt + '.npz')
+            total_count = 0
+            self.cut_list = []
 
-                # load, quat: (T, 22, 4), seq: (T, 74), skel: (T, 22, 3)
-                inpquat = np.load(inp_quat_file)
-                inseq = np.load(inp_seq_file)
-                inpskel = np.load(inp_skel_file)
-                tgtquat = np.load(tgt_quat_file)
-                tgtseq = np.load(tgt_seq_file)
-                tgtskel = np.load(tgt_skel_file)
+            for dic in self.test_pairs:
+                try:
+                    # some errors in character names: Aj and AJ
+                    inp = dic['source_character'].replace(' ', '_').replace('aj', 'AJ')
+                    tgt = dic['target_character'].replace(' ', '_').replace('aj', 'AJ')
 
-                if inseq.shape[0] < self.min_steps:
-                    continue
-                inp_gt = inseq[:, :-4].copy()
-                tgt_gt = tgtseq[:, :-4].copy()
-                inp_gt = torch.from_numpy(inp_gt)[None, :]
-                tgt_gt = torch.from_numpy(tgt_gt)[None, :]
+                    motion_name = dic['source_motion_file'].split('.')[0]
 
-                if tgtskel.shape[0] >= self.min_steps + 1:
-                    if not ("Claire" in inp and "Warrok" in tgt):
-                        total_count += 1
+                    # prepare filenames
+                    inp_fbx_file = join(self.source_path, inp, dic['source_motion_file'])
+                    inp_bvh_file = inp_fbx_file.replace('fbx', 'bvh')
+                    inp_skel_file = join(self.q_path, inp, dic['source_motion_file']).replace('.fbx', '_skel.npy')
+                    inp_seq_file = inp_skel_file.replace('_skel', '_seq')
+                    inp_quat_file = inp_skel_file.replace('_skel', '_quat')
+                    inp_shape_file = join(self.shape_path, inp + '.npz')
+                    
+                    tgt_fbx_file = join(self.source_path, tgt, dic['target_motion_file'])
+                    tgt_bvh_file = tgt_fbx_file.replace('fbx', 'bvh')
+                    tgt_skel_file = join(self.q_path, tgt, dic['target_motion_file']).replace('.fbx', '_skel.npy')
+                    tgt_seq_file = tgt_skel_file.replace('_skel', '_seq')
+                    tgt_quat_file = tgt_skel_file.replace('_skel', '_quat')
+                    tgt_shape_file = join(self.shape_path, tgt + '.npz')
 
-                inpanim, inpname, inpftime = BVH.load(inp_bvh_file)
-                tgtanim, tgtname, tgtftime = BVH.load(tgt_bvh_file)
-                gtanim = tgtanim.copy()
+                    # load, quat: (T, 22, 4), seq: (T, 74), skel: (T, 22, 3)
+                    inpquat = np.load(inp_quat_file)
+                    inseq = np.load(inp_seq_file)
+                    inpskel = np.load(inp_skel_file)
+                    tgtquat = np.load(tgt_quat_file)
+                    tgtseq = np.load(tgt_seq_file)
+                    tgtskel = np.load(tgt_skel_file)
 
-                # get the joints processed by network
-                ibvh_file = (open(inp_bvh_file).read().split("JOINT"))
-                ibvh_joints = [f.split("\n")[0].split(":")[-1].split(" ")[-1] for f in ibvh_file[1:]]
-                ito_keep = [0]
-                for jname in joints_list:
-                    for k in range(len(ibvh_joints)):
-                        if jname == ibvh_joints[k][-len(jname) :]:
-                            ito_keep.append(k + 1)
-                            break
-                tbvh_file = (open(tgt_bvh_file).read().split("JOINT"))
-                tbvh_joints = [f.split("\n")[0].split(":")[-1].split(" ")[-1] for f in tbvh_file[1:]]
-                tto_keep = [0]
-                for jname in joints_list:
-                    for k in range(len(tbvh_joints)):
-                        if jname == tbvh_joints[k][-len(jname) :]:
-                            tto_keep.append(k + 1)
-                            break
+                    if inseq.shape[0] < self.min_steps:
+                        continue
+                    inp_gt = inseq[:, :-4].copy()
+                    tgt_gt = tgtseq[:, :-4].copy()
+                    inp_gt = torch.from_numpy(inp_gt)[None, :]
+                    tgt_gt = torch.from_numpy(tgt_gt)[None, :]
 
-                # delete all rotations ???
-                tgtanim.rotations.qs[...] = tgtanim.orients.qs[None]
-                if not self.is_h36m:
-                    """Copy joints we don't predict"""
-                    cinames = []
-                    for jname in inpname:
-                        cinames.append(jname.split(":")[-1])
+                    if tgtskel.shape[0] >= self.min_steps + 1:
+                        if not ("Claire" in inp and "Warrok" in tgt):
+                            total_count += 1
 
-                    ctnames = []
-                    for jname in tgtname:
-                        ctnames.append(jname.split(":")[-1])
+                    inpanim, inpname, inpftime = BVH.load(inp_bvh_file)
+                    tgtanim, tgtname, tgtftime = BVH.load(tgt_bvh_file)
+                    gtanim = tgtanim.copy()
 
-                    for jname in cinames:
-                        if jname in ctnames:
-                            idxt = ctnames.index(jname)
-                            idxi = cinames.index(jname)
-                            tgtanim.rotations[:, idxt] = inpanim.rotations[:, idxi].copy()
+                    # get the joints processed by network
+                    ibvh_file = (open(inp_bvh_file).read().split("JOINT"))
+                    ibvh_joints = [f.split("\n")[0].split(":")[-1].split(" ")[-1] for f in ibvh_file[1:]]
+                    ito_keep = [0]
+                    for jname in joints_list:
+                        for k in range(len(ibvh_joints)):
+                            if jname == ibvh_joints[k][-len(jname) :]:
+                                ito_keep.append(k + 1)
+                                break
+                    tbvh_file = (open(tgt_bvh_file).read().split("JOINT"))
+                    tbvh_joints = [f.split("\n")[0].split(":")[-1].split(" ")[-1] for f in tbvh_file[1:]]
+                    tto_keep = [0]
+                    for jname in joints_list:
+                        for k in range(len(tbvh_joints)):
+                            if jname == tbvh_joints[k][-len(jname) :]:
+                                tto_keep.append(k + 1)
+                                break
 
-                    tgtanim.positions[:, 0] = inpanim.positions[:, 0].copy()
+                    # delete all rotations ???
+                    tgtanim.rotations.qs[...] = tgtanim.orients.qs[None]
+                    if not self.is_h36m:
+                        """Copy joints we don't predict"""
+                        cinames = []
+                        for jname in inpname:
+                            cinames.append(jname.split(":")[-1])
 
-                # Put the skels at the same height as the sequence
-                """Subtract lowers point in first timestep for floor contact"""
-                floor_diff = inseq[0, 1:-8:3].min() - tgtseq[0, 1:-8:3].min()
-                tgtseq[:, 1:-8:3] += floor_diff
-                tgtskel[:, 0, 1] = tgtseq[:, 1].copy()
-                offset = inseq[:, -8:-4]
-                inseq = np.reshape(inseq[:, :-8], [inseq.shape[0], -1, 3])
-                num_samples = inseq.shape[0] // self.max_steps
+                        ctnames = []
+                        for jname in tgtname:
+                            ctnames.append(jname.split(":")[-1])
 
-                # cut the motion sequence by 120 frmes
-                for s in range(num_samples):
-                    input_joints.append(ito_keep)
-                    target_joints.append(tto_keep)
-                    input_animation.append(OrderedDict(
-                        animation = inpanim.copy()[s * self.max_steps : (s + 1) * self.max_steps], 
-                        name = inpname, 
-                        ftime = inpftime,
-                    ))
-                    target_animation.append(OrderedDict(
-                        animation = tgtanim.copy()[s * self.max_steps : (s + 1) * self.max_steps], 
-                        name = tgtname, 
-                        ftime = tgtftime,
-                    ))
-                    animation_gt.append([gtanim.copy()[s * self.max_steps : (s + 1) * self.max_steps], tgtname, tgtftime])
-                    input_local.append(inseq[s * self.max_steps : (s + 1) * self.max_steps])
-                    input_global.append(offset[s * self.max_steps : (s + 1) * self.max_steps])
-                    target_data.append(tgtseq[s * self.max_steps : (s + 1) * self.max_steps, :-4])
-                    target_skel.append(tgtskel[s * self.max_steps : (s + 1) * self.max_steps])
-                    input_skel.append(inpskel[s * self.max_steps : (s + 1) * self.max_steps])
-                    from_name.append(inp)
-                    from_shape_name.append(inp)
-                    to_name.append(tgt)
-                    to_shape_name.append(tgt)
+                        for jname in cinames:
+                            if jname in ctnames:
+                                idxt = ctnames.index(jname)
+                                idxi = cinames.index(jname)
+                                tgtanim.rotations[:, idxt] = inpanim.rotations[:, idxi].copy()
 
-                    input_gt.append(inp_gt[0, s * self.max_steps : (s + 1) * self.max_steps])
-                    target_gt.append(tgt_gt[0, s * self.max_steps : (s + 1) * self.max_steps])
-                    inp_bvh_path.append(inp_bvh_file)
-                    tgt_bvh_path.append(tgt_bvh_file)
-                    inp_shape_path.append(inp_shape_file)
-                    tgt_shape_path.append(tgt_shape_file)
+                        tgtanim.positions[:, 0] = inpanim.positions[:, 0].copy()
 
-                    target_quat.append(tgtquat[s * self.max_steps : (s + 1) * self.max_steps])
-                    input_quat.append(inpquat[s * self.max_steps : (s + 1) * self.max_steps])
+                    # Put the skels at the same height as the sequence
+                    """Subtract lowers point in first timestep for floor contact"""
+                    floor_diff = inseq[0, 1:-8:3].min() - tgtseq[0, 1:-8:3].min()
+                    tgtseq[:, 1:-8:3] += floor_diff
+                    tgtskel[:, 0, 1] = tgtseq[:, 1].copy()
+                    offset = inseq[:, -8:-4]
+                    inseq = np.reshape(inseq[:, :-8], [inseq.shape[0], -1, 3])
+                    num_samples = inseq.shape[0] // self.max_steps
 
-                    self.cut_list.append([s * self.max_steps, (s + 1) * self.max_steps])
+                    # cut the motion sequence by 120 frmes
+                    for s in range(num_samples):
+                        input_joints.append(ito_keep)
+                        target_joints.append(tto_keep)
+                        input_animation.append(OrderedDict(
+                            animation = inpanim.copy()[s * self.max_steps : (s + 1) * self.max_steps], 
+                            name = inpname, 
+                            ftime = inpftime,
+                        ))
+                        target_animation.append(OrderedDict(
+                            animation = tgtanim.copy()[s * self.max_steps : (s + 1) * self.max_steps], 
+                            name = tgtname, 
+                            ftime = tgtftime,
+                        ))
+                        animation_gt.append([gtanim.copy()[s * self.max_steps : (s + 1) * self.max_steps], tgtname, tgtftime])
+                        input_local.append(inseq[s * self.max_steps : (s + 1) * self.max_steps])
+                        input_global.append(offset[s * self.max_steps : (s + 1) * self.max_steps])
+                        target_data.append(tgtseq[s * self.max_steps : (s + 1) * self.max_steps, :-4])
+                        target_skel.append(tgtskel[s * self.max_steps : (s + 1) * self.max_steps])
+                        input_skel.append(inpskel[s * self.max_steps : (s + 1) * self.max_steps])
+                        from_name.append(inp)
+                        from_shape_name.append(inp)
+                        to_name.append(tgt)
+                        to_shape_name.append(tgt)
 
-                # cut the motion from the other side
-                if not inseq.shape[0] % self.max_steps == 0:
-                    input_joints.append(ito_keep)
-                    target_joints.append(tto_keep)
-                    input_animation.append(OrderedDict(
-                        animation = inpanim.copy()[-self.max_steps:], 
-                        name = inpname, 
-                        ftime = inpftime,
-                    ))
-                    target_animation.append([tgtanim.copy()[-self.max_steps:], tgtname, tgtftime])
-                    animation_gt.append([gtanim.copy()[-self.max_steps:], tgtname, tgtftime])
-                    input_local.append(inseq[-self.max_steps:])
-                    input_global.append(offset[-self.max_steps:])
-                    target_data.append(tgtseq[-self.max_steps:, :-4])
-                    target_skel.append(tgtskel[-self.max_steps:])
-                    input_skel.append(inpskel[-self.max_steps:])
-                    target_quat.append(tgtquat[-self.max_steps:])
-                    input_quat.append(inpquat[-self.max_steps:])
-                    from_name.append(inp)
-                    from_shape_name.append(inp)
-                    to_name.append(tgt)
-                    to_shape_name.append(tgt)
+                        input_gt.append(inp_gt[0, s * self.max_steps : (s + 1) * self.max_steps])
+                        target_gt.append(tgt_gt[0, s * self.max_steps : (s + 1) * self.max_steps])
+                        inp_bvh_path.append(inp_bvh_file)
+                        tgt_bvh_path.append(tgt_bvh_file)
+                        inp_shape_path.append(inp_shape_file)
+                        tgt_shape_path.append(tgt_shape_file)
 
-                    input_gt.append(inp_gt[0, -self.max_steps:])
-                    target_gt.append(tgt_gt[0, -self.max_steps:])
-                    inp_bvh_path.append(inp_bvh_file)
-                    tgt_bvh_path.append(tgt_bvh_file)
-                    inp_shape_path.append(inp_shape_file)
-                    tgt_shape_path.append(tgt_shape_file)
+                        target_quat.append(tgtquat[s * self.max_steps : (s + 1) * self.max_steps])
+                        input_quat.append(inpquat[s * self.max_steps : (s + 1) * self.max_steps])
 
-                    # test_types.append(test_type)
+                        motion_names.append(motion_name)
 
-                    self.cut_list.append([-self.max_steps, None])
+                        self.cut_list.append([s * self.max_steps, (s + 1) * self.max_steps])
 
-            # leave out the wrong pairs
-            except Exception as e:
-                print(dic, e)
-        
-        self.testlocal_norm = input_local.copy()
-        self.testglobal = input_global
-        self.testoutseq = target_data
-        self.input_joints = input_joints
-        self.input_animation = input_animation
-        self.target_joints = target_joints
-        self.target_animation = target_animation
-        self.testskel_norm = target_skel.copy()
-        self.inpskel_norm = input_skel.copy()
-        self.animation_gt = animation_gt
-        self.from_name = from_name
-        self.to_name = to_name
-        self.from_shape_name = from_shape_name
-        self.to_shape_name = to_shape_name
+                    # cut the motion from the other side
+                    if not inseq.shape[0] % self.max_steps == 0:
+                        input_joints.append(ito_keep)
+                        target_joints.append(tto_keep)
+                        input_animation.append(OrderedDict(
+                            animation = inpanim.copy()[-self.max_steps:], 
+                            name = inpname, 
+                            ftime = inpftime,
+                        ))
+                        target_animation.append([tgtanim.copy()[-self.max_steps:], tgtname, tgtftime])
+                        animation_gt.append([gtanim.copy()[-self.max_steps:], tgtname, tgtftime])
+                        input_local.append(inseq[-self.max_steps:])
+                        input_global.append(offset[-self.max_steps:])
+                        target_data.append(tgtseq[-self.max_steps:, :-4])
+                        target_skel.append(tgtskel[-self.max_steps:])
+                        input_skel.append(inpskel[-self.max_steps:])
+                        target_quat.append(tgtquat[-self.max_steps:])
+                        input_quat.append(inpquat[-self.max_steps:])
+                        from_name.append(inp)
+                        from_shape_name.append(inp)
+                        to_name.append(tgt)
+                        to_shape_name.append(tgt)
 
-        self.target_quat_norm = target_quat.copy()
-        self.input_quat_norm = input_quat.copy()
+                        input_gt.append(inp_gt[0, -self.max_steps:])
+                        target_gt.append(tgt_gt[0, -self.max_steps:])
+                        inp_bvh_path.append(inp_bvh_file)
+                        tgt_bvh_path.append(tgt_bvh_file)
+                        inp_shape_path.append(inp_shape_file)
+                        tgt_shape_path.append(tgt_shape_file)
 
-        self.input_gt = input_gt
-        self.target_gt = target_gt
-        self.inp_bvh_path = inp_bvh_path
-        self.tgt_bvh_path = tgt_bvh_path
-        self.inp_shape_path = inp_shape_path
-        self.tgt_shape_path = tgt_shape_path
+                        motion_names.append(motion_name)
 
-        self.test_types = test_types
+                        self.cut_list.append([-self.max_steps, None])
+
+                # leave out the wrong pairs
+                except Exception as e:
+                    pass
+
+            self.testlocal_norm = input_local.copy()
+            self.testglobal = input_global
+            self.testoutseq = target_data
+            self.input_joints = input_joints
+            self.input_animation = input_animation
+            self.target_joints = target_joints
+            self.target_animation = target_animation
+            self.testskel_norm = target_skel.copy()
+            self.inpskel_norm = input_skel.copy()
+            self.animation_gt = animation_gt
+            self.from_name = from_name
+            self.to_name = to_name
+            self.from_shape_name = from_shape_name
+            self.to_shape_name = to_shape_name
+
+            self.target_quat_norm = target_quat.copy()
+            self.input_quat_norm = input_quat.copy()
+
+            self.input_gt = input_gt
+            self.target_gt = target_gt
+            self.inp_bvh_path = inp_bvh_path
+            self.tgt_bvh_path = tgt_bvh_path
+            self.inp_shape_path = inp_shape_path
+            self.tgt_shape_path = tgt_shape_path
+
+            self.test_types = test_types
+            self.motion_names = motion_names
+
+            inference_data = OrderedDict(
+                input_local=input_local,
+                input_global=input_global,
+                target_data=target_data,
+                input_joints=input_joints,
+                input_animation=input_animation,
+                target_joints=target_joints,
+                target_animation=target_animation,
+                target_skel=target_skel,
+                input_skel=input_skel,
+                animation_gt=animation_gt,
+                from_name=from_name,
+                to_name=to_name,
+                from_shape_name=from_shape_name,
+                to_shape_name=to_shape_name,
+                target_quat=target_quat,
+                input_quat=input_quat,
+                input_gt=input_gt,
+                target_gt=target_gt,
+                inp_bvh_path=inp_bvh_path,
+                tgt_bvh_path=tgt_bvh_path,
+                inp_shape_path=inp_shape_path,
+                tgt_shape_path=tgt_shape_path,
+                test_types=test_types,
+                motion_names=motion_names
+            )
+            np.save('./datasets/mixamo/inference/inference_data.npy', inference_data)
+
+        else:
+
+            inference_data = np.load(self.inference_data_path, allow_pickle=True).item()
+
+            self.testlocal_norm = inference_data['input_local']
+            self.testglobal = inference_data['input_global']
+            self.testoutseq = inference_data['target_data']
+            self.input_joints = inference_data['input_joints']
+            self.input_animation = inference_data['input_animation']
+            self.target_joints = inference_data['target_joints']
+            self.target_animation = inference_data['target_animation']
+            self.testskel_norm = inference_data['target_skel']
+            self.inpskel_norm = inference_data['input_skel']
+            self.animation_gt = inference_data['animation_gt']
+            self.from_name = inference_data['from_name']
+            self.to_name = inference_data['to_name']
+            self.from_shape_name = inference_data['from_shape_name']
+            self.to_shape_name = inference_data['to_shape_name']
+
+            self.target_quat_norm = inference_data['target_quat']
+            self.input_quat_norm = inference_data['input_quat']
+
+            self.input_gt = inference_data['input_gt']
+            self.target_gt = inference_data['target_gt']
+            self.inp_bvh_path = inference_data['inp_bvh_path']
+            self.tgt_bvh_path = inference_data['tgt_bvh_path']
+            self.inp_shape_path = inference_data['inp_shape_path']
+            self.tgt_shape_path = inference_data['tgt_shape_path']
+
+            self.test_types = inference_data['test_types']
+            self.motion_names = inference_data['motion_names']
 
         self.local_mean = np.load(join(self.stats_path, "mixamo_local_motion_mean.npy"))
         self.local_std = np.load(join(self.stats_path, "mixamo_local_motion_std.npy"))
@@ -395,6 +467,7 @@ class Feeder(Dataset):
 
         return (
             index,
+            self.motion_names[index],
             seqA_localnorm,
             skelA_norm,
             skelB_norm,

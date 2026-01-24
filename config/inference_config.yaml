@@ -1,21 +1,35 @@
 work_dir: ./work_dir/paper_version/
 mesh_path: ./datasets/mixamo/shape/
 texture_path: ./datasets/mixamo/texture_datapath/
-model_save_name: retarget_model
+video_path: ./render_dir/paper_version/
+
+model_save_name: star
 device: [0]
 seed: 42
-description: This is the testing process of STaR.
+description: This is the inference process of STaR, with rendered videos.
 wandb_tags: ['STaR']
 
+euler_order: yzx
 max_length: 60
 num_joints: 22
-kp: 0.8
 margin: 0.3
 
-test_set: datasets.test_set.Feeder
-test_set_args:
-  test_pairs: ./datasets/mixamo/test/test.json
-  test_data_path: ./datasets/mixamo/test/test_data.npy  # simple version
+# inference_scanret_feeder: datasets.inference_feeder_scanret.Feeder
+# inference_scanret_feeder_args:
+#   source_path:
+#   q_path: ./datasets/mixamo/test_q_scanret/
+#   stats_path: ./datasets/mixamo/stats_scanret/
+#   shape_path: ./datasets/mixamo/new_train_shape_uv_scanret/
+#   texture_path: ./datasets/mixamo/texture_datapath/
+#   min_steps: 60
+#   max_steps: 60
+
+inference_feeder: datasets.inference_set.Feeder
+inference_feeder_args:
+  inference_pairs: ./datasets/mixamo/inference/inference.json
+  inference_data_path: ./datasets/mixamo/inference/inference_data.npy  # simple version
+  source_path: ./datasets/mixamo/inference/inference_source/
+  q_path: ./datasets/mixamo/inference/inference_q/
   stats_path: ./datasets/mixamo/stats/
   shape_path: ./datasets/mixamo/test_shape/  # test shapes are more than train shapes, for unseen characters
   min_steps: 120
@@ -32,18 +46,6 @@ model_args:
   token_channels: 64
   hidden_channels: 64
   embed_channels: 32
-
-loss_function: Loss
-loss_args:
-  joint_vector_loss: 1.0
-  temporal_loss: 1.0
-  constrain_loss: 0.01
-  twist_constrain_loss: 10.0
-  new_geometric_loss:
-    - 10.0
-    - 0.0
-alpha: 100
-euler_order: yzx
 
 scale_info_path: ./datasets/mixamo/scale_info/
 hand_vert_num: 200
@@ -66,4 +68,3 @@ global_step: [30]
 batch_size: 16
 test_k: 0.8
 test_batch_size: 64
-weight_decay: 0.0

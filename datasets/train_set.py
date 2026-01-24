@@ -14,8 +14,9 @@ from utils import put_in_world
 
 
 class Feeder(Dataset):
-    def __init__(self, source_path, q_path, stats_path, shape_path, max_length, is_val=False):
+    def __init__(self, source_path, train_data_path, q_path, stats_path, shape_path, max_length, is_val=False):
         self.source_path = source_path
+        self.train_data_path = train_data_path
         self.q_path = q_path
         self.stats_path = stats_path
         self.max_length = max_length

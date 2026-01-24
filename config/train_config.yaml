@@ -1,22 +1,24 @@
-work_dir: ./work_dir/train_release/
+work_dir: ./work_dir/train_new/
 mesh_path: ./datasets/mixamo/shape/
 texture_path: ./datasets/mixamo/texture_datapath/
+
 model_save_name: star
 device: [0]
 seed: 42
 description: This is the training process of STaR.
 wandb_tags: ['STaR']
 
+euler_order: yzx
 max_length: 60
 num_joints: 22
-kp: 0.8
 margin: 0.3
 
 train_set: datasets.train_set.Feeder
 train_set_args:
-  source_path: ./datasets/mixamo/train_source/
-  q_path: ./datasets/mixamo/train_q/
-  stats_path: ./datasets/mixamo/stats/
+  source_path: ./datasets/mixamo/train/train_source/
+  train_data_path: ./datasets/mixamo/train/train_data.npy  # simple version
+  q_path: ./datasets/mixamo/train/train_q/
+  stats_path: ./datasets/mixamo/stats/  # will calculate the stats, which will be used for test / inference
   shape_path: ./datasets/mixamo/new_train_shape/
   max_length: 60
 
@@ -29,16 +31,6 @@ test_set_args:
   min_steps: 120
   max_steps: 120
 
-# inference_set: datasets.inference_set.Feeder
-# inference_set_args:
-#   test_pairs: ./datasets/mixamo/inference.json
-#   source_path: ./datasets/mixamo/inference_source/
-#   q_path: ./datasets/mixamo/inference_q/
-#   stats_path: ./datasets/mixamo/stats/
-#   shape_path: ./datasets/mixamo/test_shape/
-#   min_steps: 120
-#   max_steps: 120
-
 model_path: method.network
 model_name: Retarget_Model
 optimize_param:
@@ -50,7 +42,6 @@ model_args:
   token_channels: 64
   hidden_channels: 64
   embed_channels: 32
-  kp: 0.8
 
 loss_function: Loss
 loss_args:
@@ -59,10 +50,8 @@ loss_args:
   constrain_loss: 0.01
   twist_constrain_loss: 10.0
   new_geometric_loss:
-    - 10.0   # repulsive
-    - 0.0   # attractive
-alpha: 100
-euler_order: yzx
+    - 10.0
+    - 0.0
 
 scale_info_path: ./datasets/mixamo/scale_info/
 hand_vert_num: 200

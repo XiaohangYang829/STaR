@@ -11,7 +11,7 @@ from pytorch3d.renderer import (
     PointLights,
     RasterizationSettings,
 )
-from src.linear_blend_skin import linear_blend_skinning
+from method.linear_blend_skin import linear_blend_skinning
 from pytorch3d.structures import Meshes
 
 import matplotlib

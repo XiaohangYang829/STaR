@@ -107,13 +107,13 @@ def test(
         nameA_lst = [name.split('_', 1)[-1] for name in source_name]
         nameB_lst = [name.split('_', 1)[-1] for name in target_name]
         pointsA = [
-            random_point_select_torch(torch.Tensor(full_mesh_info['rest_vertices'][name]).cuda(arg.device[0])) - \
+            random_point_select_torch(torch.Tensor(full_mesh_info['rest_vertices'][name]).cuda()) - \
             full_mesh_info['scale_info'][name]['centroid'] for name in nameA_lst
         ]
         sampling_pointsA = torch.cat(pointsA, dim=0) * scale_factor
         sampling_pointsA = sampling_pointsA.permute(0, 2, 1)
         pointsB = [
-            random_point_select_torch(torch.Tensor(full_mesh_info['rest_vertices'][name]).cuda(arg.device[0])) - \
+            random_point_select_torch(torch.Tensor(full_mesh_info['rest_vertices'][name]).cuda()) - \
             full_mesh_info['scale_info'][name]['centroid'] for name in nameB_lst
         ]
         sampling_pointsB = torch.cat(pointsB, dim=0) * scale_factor
@@ -440,13 +440,13 @@ def main(arg):
     }
     test_loader = torch.utils.data.DataLoader(dataset=test_feeder, batch_size=arg.test_batch_size, num_workers=8, shuffle=False)
 
-    encoder = import_str(arg.model_path + '.' + arg.encoding_model)(**arg.encoding_model_args).cuda(arg.device[0])
+    encoder = import_str(arg.model_path + '.' + arg.encoding_model)(**arg.encoding_model_args).cuda()
     encoder = nn.DataParallel(encoder, device_ids=arg.device)
     assert arg.encoding_model_weights is not None
     encoder.load_state_dict(torch.load(arg.encoding_model_weights))
     encoder.eval()
 
-    retarget_net = import_str(arg.model_path + '.' + arg.model_name)(**arg.model_args).cuda(arg.device[0])
+    retarget_net = import_str(arg.model_path + '.' + arg.model_name)(**arg.model_args).cuda()
     retarget_net = nn.DataParallel(retarget_net, device_ids=arg.device)
     retarget_net.load_state_dict(torch.load(join(arg.work_dir, arg.test_weights)))
     retarget_net.eval()
