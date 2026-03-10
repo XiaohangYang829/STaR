@@ -154,6 +154,8 @@ All rendered videos will be saved in ```./render_dir/.../```. Edit the parameter
 
 ## Train
 
+We split the trainset into train split and validation split.
+
 ```
 python train.py --config ./config/train_config.yaml
 ```
