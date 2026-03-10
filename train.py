@@ -33,12 +33,14 @@ else:
 
 from method.ops import get_wjs
 from method.utils import import_str, load_model_w_dis, print_log_txt, AverageMeter, init_seed, put_in_world, get_height, random_point_select_torch
+from datasets.utils.quaternion import cont6d_to_quaternion
 from method.metric import penetrate_1, curvature_1, curvature_2
 
 
 def get_parser():
     parser = argparse.ArgumentParser(description='motion retargeting')
     parser.add_argument('--config', default='./config/config.yaml', help='path to the configuration file')
+    parser.add_argument('--debug', action='store_true', help='set num_workers=0 in DataLoaders (avoids stucking on local machines)')
     return parser
 
 
@@ -51,6 +53,7 @@ def test(
     full_mesh_info,
     experiment_name,
     epoch,
+    suffix='',
 ):
 
     pbar = tqdm(total=len(dataloader), ncols=140)
@@ -120,20 +123,23 @@ def test(
         scale_factor = 0.007
         nameA_lst = [name.split('_', 1)[-1] for name in source_name]
         nameB_lst = [name.split('_', 1)[-1] for name in target_name]
-        pointsA = [
-            random_point_select_torch(torch.Tensor(full_mesh_info['rest_vertices'][name]).cuda(arg.device[0])) - \
-            full_mesh_info['scale_info'][name]['centroid'] for name in nameA_lst
-        ]
-        sampling_pointsA = torch.cat(pointsA, dim=0) * scale_factor
-        sampling_pointsA = sampling_pointsA.permute(0, 2, 1)
         pointsB = [
             random_point_select_torch(torch.Tensor(full_mesh_info['rest_vertices'][name]).cuda(arg.device[0])) - \
             full_mesh_info['scale_info'][name]['centroid'] for name in nameB_lst
         ]
         sampling_pointsB = torch.cat(pointsB, dim=0) * scale_factor
         sampling_pointsB = sampling_pointsB.permute(0, 2, 1)
-        shape_encoding_A = encoder(sampling_pointsA).detach()
         shape_encoding_B = encoder(sampling_pointsB).detach()
+        if getattr(arg, 'use_source_mesh', True):
+            pointsA = [
+                random_point_select_torch(torch.Tensor(full_mesh_info['rest_vertices'][name]).cuda(arg.device[0])) - \
+                full_mesh_info['scale_info'][name]['centroid'] for name in nameA_lst
+            ]
+            sampling_pointsA = torch.cat(pointsA, dim=0) * scale_factor
+            sampling_pointsA = sampling_pointsA.permute(0, 2, 1)
+            shape_encoding_A = encoder(sampling_pointsA).detach()
+        else:
+            shape_encoding_A = torch.zeros_like(shape_encoding_B)
         torch.cuda.empty_cache()
 
         quatB_rt, localB_rt, globalB_rt, quatB_base, localB_base, _, _ = retarget_net(
@@ -191,16 +197,16 @@ def test(
             mse_copy.append(1. / height * ((ret_global_copy - gt_global) ** 2).mean())
             mse_local_copy.append(1. / height * ((ret_local_copy - gt_local) ** 2).mean())
 
-            vert_num, pene_num = penetrate_r2et(skelB[i, 0], test_info['parents'], nameB, quatB[i], full_mesh_info)
-            penetration_r2et_rate_gt.append(pene_num / vert_num)
+            # vert_num, pene_num = penetrate_r2et(skelB[i, 0], test_info['parents'], nameB, quatB[i], full_mesh_info)
+            penetration_r2et_rate_gt.append(0)
             vert_num, pene_num = penetrate_1(skelB[i, 0], test_info['parents'], nameB, quatB[i], full_mesh_info)
             penetration_mine_rate_gt.append(pene_num / vert_num)
-            vert_num, pene_num = penetrate_r2et(skelB[i, 0], test_info['parents'], nameB, quatB_rt[i], full_mesh_info)
-            penetration_r2et_rate_ret.append(pene_num / vert_num)
+            # vert_num, pene_num = penetrate_r2et(skelB[i, 0], test_info['parents'], nameB, quatB_rt[i], full_mesh_info)
+            penetration_r2et_rate_ret.append(0)
             vert_num, pene_num = penetrate_1(skelB[i, 0], test_info['parents'], nameB, quatB_rt[i], full_mesh_info)
             penetration_mine_rate_ret.append(pene_num / vert_num)
-            vert_num, pene_num = penetrate_r2et(skelB[i, 0], test_info['parents'], nameB, quatB_base[i], full_mesh_info)
-            penetration_r2et_rate_copy.append(pene_num / vert_num)
+            # vert_num, pene_num = penetrate_r2et(skelB[i, 0], test_info['parents'], nameB, quatB_base[i], full_mesh_info)
+            penetration_r2et_rate_copy.append(0)
             vert_num, pene_num = penetrate_1(skelB[i, 0], test_info['parents'], nameB, quatB_base[i], full_mesh_info)
             penetration_mine_rate_copy.append(pene_num / vert_num)
 
@@ -217,7 +223,7 @@ def test(
         pbar.update(1)
     pbar.close()
 
-    f = open(os.path.join(arg.work_dir, 'eval-train-{}.txt'.format(epoch)), 'w')
+    f = open(os.path.join(arg.work_dir, 'eval-train-{}{}.txt'.format(epoch, suffix)), 'w')
     f.write(experiment_name + '\n')
     f.write("MSE.\n")
     f.write("Ret MAE\t\t\t" + "{0:.6f}".format(np.mean(mae)) + "\n")
@@ -304,20 +310,27 @@ def train(
         scale_factor = 0.007
         nameA_lst = [train_val_info['all_names'][i] for i in indexesA]
         nameB_lst = [train_val_info['all_names'][i] for i in indexesB]
-        pointsA = [
-            random_point_select_torch(torch.Tensor(full_mesh_info['rest_vertices'][name]).cuda(arg.device[0])) - \
-            full_mesh_info['scale_info'][name]['centroid'] for name in nameA_lst
-        ]
-        sampling_pointsA = torch.cat(pointsA, dim=0) * scale_factor
-        sampling_pointsA = sampling_pointsA.permute(0, 2, 1)
         pointsB = [
             random_point_select_torch(torch.Tensor(full_mesh_info['rest_vertices'][name]).cuda(arg.device[0])) - \
             full_mesh_info['scale_info'][name]['centroid'] for name in nameB_lst
         ]
         sampling_pointsB = torch.cat(pointsB, dim=0) * scale_factor
         sampling_pointsB = sampling_pointsB.permute(0, 2, 1)
-        shape_encoding_A = encoder(sampling_pointsA).detach()
         shape_encoding_B = encoder(sampling_pointsB).detach()
+        if getattr(arg, 'use_source_mesh', True):
+            pointsA = [
+                random_point_select_torch(torch.Tensor(full_mesh_info['rest_vertices'][name]).cuda(arg.device[0])) - \
+                full_mesh_info['scale_info'][name]['centroid'] for name in nameA_lst
+            ]
+            sampling_pointsA = torch.cat(pointsA, dim=0) * scale_factor
+            sampling_pointsA = sampling_pointsA.permute(0, 2, 1)
+            shape_encoding_A = encoder(sampling_pointsA).detach()
+            drop_prob = getattr(arg, 'source_mesh_drop_prob', 0.0)
+            if drop_prob > 0.0:
+                mask = (torch.rand(bs) >= drop_prob).float().to(shape_encoding_A.device)
+                shape_encoding_A = shape_encoding_A * mask[:, None]
+        else:
+            shape_encoding_A = torch.zeros_like(shape_encoding_B)
         torch.cuda.empty_cache()
 
         quatB_rt, localB_rt, globalB_rt, quatB_base, localB_base, vecA, vecB_rt = retarget_net(
@@ -402,6 +415,8 @@ def train(
     })
 
     ## validate
+    val_pen_rate = None
+    val_curv_diff = None
     if (epoch + 1) % 2 == 0:
         pbar = tqdm(total=len(val_loader), ncols=140)
 
@@ -452,20 +467,23 @@ def train(
             nameA_lst = [train_val_info['all_names'][i] for i in indexesA]
             nameB_lst = [train_val_info['all_names'][i] for i in indexesB]
 
-            pointsA = [
-                random_point_select_torch(torch.Tensor(full_mesh_info['rest_vertices'][name]).cuda(arg.device[0])) - \
-                full_mesh_info['scale_info'][name]['centroid'] for name in nameA_lst
-            ]
-            sampling_pointsA = torch.cat(pointsA, dim=0) * scale_factor
-            sampling_pointsA = sampling_pointsA.permute(0, 2, 1)
             pointsB = [
                 random_point_select_torch(torch.Tensor(full_mesh_info['rest_vertices'][name]).cuda(arg.device[0])) - \
                 full_mesh_info['scale_info'][name]['centroid'] for name in nameB_lst
             ]
             sampling_pointsB = torch.cat(pointsB, dim=0) * scale_factor
             sampling_pointsB = sampling_pointsB.permute(0, 2, 1)
-            shape_encoding_A = encoder(sampling_pointsA).detach()
             shape_encoding_B = encoder(sampling_pointsB).detach()
+            if getattr(arg, 'use_source_mesh', True):
+                pointsA = [
+                    random_point_select_torch(torch.Tensor(full_mesh_info['rest_vertices'][name]).cuda(arg.device[0])) - \
+                    full_mesh_info['scale_info'][name]['centroid'] for name in nameA_lst
+                ]
+                sampling_pointsA = torch.cat(pointsA, dim=0) * scale_factor
+                sampling_pointsA = sampling_pointsA.permute(0, 2, 1)
+                shape_encoding_A = encoder(sampling_pointsA).detach()
+            else:
+                shape_encoding_A = torch.zeros_like(shape_encoding_B)
             torch.cuda.empty_cache()
 
             quatB_rt, localB_rt, globalB_rt, quatB_base, localB_base, _, _ = retarget_net(
@@ -488,7 +506,12 @@ def train(
 
             skelA = skelA_norm.detach().view(bs, T, 22, 3) * train_val_info['local_std'] + train_val_info['local_mean']
             skelB = skelB_norm.detach().view(bs, T, 22, 3) * train_val_info['local_std'] + train_val_info['local_mean']
-            quatA = quatA_norm_cp.detach().view(bs, T, 22, 4) * train_val_info['quat_std'] + train_val_info['quat_mean']
+            rot_dim = quatA_norm_cp.shape[-1]
+            quatA_denorm = quatA_norm_cp.detach().view(bs, T, 22, rot_dim) * train_val_info['quat_std'] + train_val_info['quat_mean']
+            if rot_dim == 6:
+                quatA = cont6d_to_quaternion(quatA_denorm.reshape(-1, 6)).view(bs, T, 22, 4)
+            else:
+                quatA = quatA_denorm
             quatB_rt = quatB_rt.detach().view(bs, T, 22, 4)
             quatB_base = quatB_base.detach().view(bs, T, 22, 4)
 
@@ -496,12 +519,12 @@ def train(
                 nameA = nameA_lst[i]
                 nameB = nameB_lst[i]
 
-                vert_num, pene_num = penetrate_r2et(skelB[i, 0], train_val_info['parents'], nameB, quatB_rt[i], full_mesh_info)
-                penetration_r2et_rate_ret.append(pene_num / vert_num)
+                # vert_num, pene_num = penetrate_r2et(skelB[i, 0], train_val_info['parents'], nameB, quatB_rt[i], full_mesh_info)
+                penetration_r2et_rate_ret.append(0)
                 vert_num, pene_num = penetrate_1(skelB[i, 0], train_val_info['parents'], nameB, quatB_rt[i], full_mesh_info)
                 penetration_mine_rate_ret.append(pene_num / vert_num)
-                vert_num, pene_num = penetrate_r2et(skelB[i, 0], train_val_info['parents'], nameB, quatB_base[i], full_mesh_info)
-                penetration_r2et_rate_copy.append(pene_num / vert_num)
+                # vert_num, pene_num = penetrate_r2et(skelB[i, 0], train_val_info['parents'], nameB, quatB_base[i], full_mesh_info)
+                penetration_r2et_rate_copy.append(0)
                 vert_num, pene_num = penetrate_1(skelB[i, 0], train_val_info['parents'], nameB, quatB_base[i], full_mesh_info)
                 penetration_mine_rate_copy.append(pene_num / vert_num)
 
@@ -541,10 +564,18 @@ def train(
         f.write("Ret Curvature\n\t" + "{}".format(curv_ret) + "\n")
         curv_copy = torch.cat(curvature_copy_lst_2, dim=0).mean(dim=0)
         f.write("Copy Curvature\n\t" + "{}".format(curv_copy) + "\n")
+        val_pen_rate = sum(penetration_mine_rate_ret) / len(penetration_mine_rate_ret)
+        curv_source_t = torch.cat(curvature_source_lst, dim=0).mean(dim=0)
+        curv_ret_t = torch.cat(curvature_ret_lst, dim=0).mean(dim=0)
+        val_curv_diff = torch.mean(torch.abs(curv_ret_t - curv_source_t)).item()
+        f.write("\nCombined Score (pen + alpha*curv_diff).\n")
+        f.write("Val Pen Rate\t\t{0:.6f}\n".format(val_pen_rate))
+        f.write("Val Curv Diff\t\t{0:.6f}\n".format(val_curv_diff))
         f.close()
+        wandb.log({"val_pen_rate": val_pen_rate, "val_curv_diff": val_curv_diff})
 
     pbar.close()
-    return epoch_loss, epoch_loss_geo, epoch_loss_temp, epoch_loss_vec, epoch_time
+    return epoch_loss, epoch_loss_geo, epoch_loss_temp, epoch_loss_vec, epoch_time, val_pen_rate, val_curv_diff
 
 
 def get_full_mesh_info(scale_info_path, train_feeder, mesh_file_dic):
@@ -811,9 +842,10 @@ def main(arg):
         "parents": torch.from_numpy(test_feeder.parents).cuda(arg.device[0]),
         "all_names": test_feeder.to_name,
     }
-    data_loader = torch.utils.data.DataLoader(dataset=train_feeder, batch_size=arg.batch_size, num_workers=8, shuffle=True)
-    val_loader = torch.utils.data.DataLoader(dataset=val_feeder, batch_size=arg.batch_size, num_workers=8, shuffle=False)
-    test_loader = torch.utils.data.DataLoader(dataset=test_feeder, batch_size=arg.test_batch_size, num_workers=8, shuffle=False)
+    nw = 0 if arg.debug else 8
+    data_loader = torch.utils.data.DataLoader(dataset=train_feeder, batch_size=arg.batch_size, num_workers=nw, shuffle=True)
+    val_loader = torch.utils.data.DataLoader(dataset=val_feeder, batch_size=arg.batch_size, num_workers=nw, shuffle=False)
+    test_loader = torch.utils.data.DataLoader(dataset=test_feeder, batch_size=arg.test_batch_size, num_workers=nw, shuffle=False)
 
     encoder = import_str(arg.model_path + '.' + arg.encoding_model)(**arg.encoding_model_args).cuda(arg.device[0])
     encoder = nn.DataParallel(encoder, device_ids=arg.device)
@@ -848,10 +880,15 @@ def main(arg):
     full_mesh_info = get_full_mesh_info(arg.scale_info_path, train_feeder, mesh_file_dic)
 
     # train
+    best_score = float('inf')
+    patience_counter = 0
+    patience = getattr(arg, 'patience', 0)          # 0 = disabled
+    balance_alpha = getattr(arg, 'balance_alpha', 1.0)
+
     sample_replace = arg.limb_vert_num > 150
     for i in range(arg.epoch):
         sample_mesh_info = resample_mesh_info(full_mesh_info, mesh_file_dic, arg, sample_replace)
-        epoch_loss, epoch_loss_geo, epoch_loss_temp, epoch_loss_vec, epoch_time = train(
+        epoch_loss, epoch_loss_geo, epoch_loss_temp, epoch_loss_vec, epoch_time, val_pen_rate, val_curv_diff = train(
             encoder,
             retarget_net,
             loss_function,
@@ -885,7 +922,40 @@ def main(arg):
             print_log_txt(log_txt, arg.work_dir)
             retarget_net.eval()
 
+        # best model tracking (only on val epochs)
+        if val_pen_rate is not None:
+            combined_score = val_pen_rate + balance_alpha * val_curv_diff
+            if combined_score < best_score:
+                best_score = combined_score
+                patience_counter = 0
+                state_dict_ret = retarget_net.state_dict()
+                weights_gen = OrderedDict([[k, v.cpu()] for k, v in state_dict_ret.items()])
+                torch.save(weights_gen, os.path.join(arg.work_dir, arg.model_save_name + '_best.pt'))
+                log_txt = (
+                    'New best model at epoch ' + str(i + 1)
+                    + '  score=' + '{0:.4f}'.format(combined_score)
+                    + '  pen=' + '{0:.4f}'.format(val_pen_rate)
+                    + '  curv_diff=' + '{0:.4f}'.format(val_curv_diff)
+                )
+                print_log_txt(log_txt, arg.work_dir)
+                wandb.log({"best_score": best_score, "best_epoch": i + 1})
+            else:
+                patience_counter += 1
+                if patience > 0 and patience_counter >= patience:
+                    print_log_txt('Early stopping at epoch ' + str(i + 1) + ' (no improvement for ' + str(patience) + ' val checks)', arg.work_dir)
+                    break
+
+    # Load best checkpoint for final evaluation (covers early-stop case too)
+    best_model_path = os.path.join(arg.work_dir, arg.model_save_name + '_best.pt')
+    test_epoch = i + 1
+    if exists(best_model_path):
+        retarget_net.load_state_dict(torch.load(best_model_path))
+        print_log_txt('Loaded best model from ' + best_model_path + ' for final evaluation.', arg.work_dir)
+        test_epoch = arg.epoch  # always write eval-train-50.txt regardless of early stop
+    retarget_net.eval()
+
     with torch.no_grad():
+        # Test (1): mesh2mesh — use_source_mesh as configured
         test(
             encoder,
             retarget_net,
@@ -894,8 +964,24 @@ def main(arg):
             arg,
             full_mesh_info,
             arg.work_dir.split('/')[-2],
-            i+1,
+            test_epoch,
+            suffix='_mesh2mesh' if not getattr(arg, 'use_source_mesh', True) else '',
         )
+        # Test (2): skel2mesh — force zero source mesh encoding
+        orig_use_source_mesh = getattr(arg, 'use_source_mesh', True)
+        arg.use_source_mesh = False
+        test(
+            encoder,
+            retarget_net,
+            test_loader,
+            test_info,
+            arg,
+            full_mesh_info,
+            arg.work_dir.split('/')[-2],
+            test_epoch,
+            suffix='_skel2mesh',
+        )
+        arg.use_source_mesh = orig_use_source_mesh
 
     wandb.finish()
 

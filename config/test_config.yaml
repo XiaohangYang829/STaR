@@ -6,6 +6,7 @@ device: [0]
 seed: 42
 description: This is the testing process of STaR.
 wandb_tags: ['STaR']
+use_source_mesh: true
 
 max_length: 60
 num_joints: 22
@@ -20,6 +21,7 @@ test_set_args:
   shape_path: ./datasets/mixamo/test_shape/  # test shapes are more than train shapes, for unseen characters
   min_steps: 120
   max_steps: 120
+  use_rot6d: false  # use 6D rotation repr (rot6d) instead of quaternions; set true when model also uses rot6d
 
 model_path: method.network
 model_name: Retarget_Model
@@ -32,6 +34,7 @@ model_args:
   token_channels: 64
   hidden_channels: 64
   embed_channels: 32
+  use_rot6d: false  # set true when model was trained with rot6d
 
 loss_function: Loss
 loss_args:

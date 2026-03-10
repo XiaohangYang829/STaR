@@ -13,6 +13,7 @@ from method.forward_kinematics import FK
 from method.linear_blend_skin import batch_linear_blend_skinning_wo_rootquat
 from method.ops import q_mul_q
 from method.point_module import sample_and_group, Point_Transformer_Last, Local_op
+from datasets.utils.quaternion import cont6d_to_quaternion
 
 sys.path.append("./submodules")
 try:
@@ -171,17 +172,20 @@ class DeltaShapeDecoder(nn.Module):
         process along not only K-joints (spatial) but also T-frames (temporal) dinemsions;
         Both STTrans ***before*** and ***after*** the concatenation;
     """
-    def __init__(self, target_num_joint, num_joint, num_frame, token_channels, embed_channels, hidden_channels, kp):
+    def __init__(self, target_num_joint, num_joint, num_frame, token_channels, embed_channels, hidden_channels, kp, use_source_shape=True, rot_dim=4):
         super(DeltaShapeDecoder, self).__init__()
 
         self.target_num_joint = target_num_joint
         self.num_joint = num_joint
         self.num_frame = num_frame
+        self.use_source_shape = use_source_shape
+        self.rot_dim = rot_dim
 
-        self.quat_encoder = SpatioEncoder(num_joint, 4, token_channels, hidden_channels, kp)
+        self.quat_encoder = SpatioEncoder(num_joint, rot_dim, token_channels, hidden_channels, kp)
         self.shape_encoder = ShapeEncoderPCD(num_joint, token_channels, embed_channels, kp)
 
-        out_channels = hidden_channels + (2 * embed_channels)
+        num_shape_encodings = 2 if use_source_shape else 1
+        out_channels = hidden_channels + (num_shape_encodings * embed_channels)
         self.spatial_encoder = SpatioEncoder(num_joint, out_channels, out_channels, out_channels, kp)
         self.temporal_encoder = TemporalEncoder(num_frame, out_channels, out_channels, kp)
 
@@ -190,16 +194,19 @@ class DeltaShapeDecoder(nn.Module):
         self.joint_drop = nn.Dropout(p=1 - kp)
 
         self.delta_linear1 = nn.Linear(out_channels, 8)
-        self.delta_linear2 = nn.Linear(self.num_joint * 8, 4 * target_num_joint)
+        self.delta_linear2 = nn.Linear(self.num_joint * 8, rot_dim * target_num_joint)
 
     def forward(self, q, shape_encoding_A, shape_encoding_B):
         bs, T, K, _ = q.shape
 
-        q_spatial = q.reshape(-1, K, 4)                # bs*T, K, 4
+        q_spatial = q.reshape(-1, K, self.rot_dim)     # bs*T, K, rot_dim
         q_embed = self.quat_encoder(q_spatial).view(bs, T, K, -1)
-        shapeA_embed = self.shape_encoder(shape_encoding_A)
         shapeB_embed = self.shape_encoder(shape_encoding_B)
-        x_cat = torch.cat([q_embed, shapeA_embed[:, None].repeat(1, T, 1, 1), shapeB_embed[:, None].repeat(1, T, 1, 1)], dim=-1)
+        if self.use_source_shape:
+            shapeA_embed = self.shape_encoder(shape_encoding_A)
+            x_cat = torch.cat([q_embed, shapeA_embed[:, None].repeat(1, T, 1, 1), shapeB_embed[:, None].repeat(1, T, 1, 1)], dim=-1)
+        else:
+            x_cat = torch.cat([q_embed, shapeB_embed[:, None].repeat(1, T, 1, 1)], dim=-1)
 
         f = x_cat.shape[-1]
         q_spatial = x_cat.view(-1, K, f)
@@ -265,11 +272,13 @@ class Pct(nn.Module):
 
 
 class Retarget_Model(nn.Module):
-    def __init__(self, num_joint=22, num_frame=60, token_channels=64, hidden_channels=256, embed_channels=128, kp=0.8):
+    def __init__(self, num_joint=22, num_frame=60, token_channels=64, hidden_channels=256, embed_channels=128, kp=0.8, use_source_shape=True, use_rot6d=False):
         super(Retarget_Model, self).__init__()
         self.num_joint = num_joint
         self.num_frame = num_frame
-        self.delta_shape_dec = DeltaShapeDecoder(10, num_joint, num_frame, token_channels, embed_channels, hidden_channels, kp)
+        self.use_rot6d = use_rot6d
+        rot_dim = 6 if use_rot6d else 4
+        self.delta_shape_dec = DeltaShapeDecoder(10, num_joint, num_frame, token_channels, embed_channels, hidden_channels, kp, use_source_shape=use_source_shape, rot_dim=rot_dim)
 
     def forward(
         self,
@@ -296,31 +305,40 @@ class Retarget_Model(nn.Module):
         tpose_skelB = tpose_skelB_norm * general_info['local_std'] + general_info['local_mean']
         tpose_skelA_norm = torch.reshape(skelA_norm[:, 0, :], [bs, self.num_joint, 3])
         tpose_skelA = tpose_skelA_norm * general_info['local_std'] + general_info['local_mean']
-        quatA_cp = quatA_norm_cp * general_info['quat_std'][None, :] + general_info['quat_mean'][None, :]
+        # Denormalize input rotations; convert rot6d → quat so FK/LBS/losses always receive quaternions
+        rot_cp = quatA_norm_cp * general_info['quat_std'][None, :] + general_info['quat_mean'][None, :]
+        if self.use_rot6d:
+            quatA_cp = cont6d_to_quaternion(rot_cp.reshape(-1, K, 6)).view(bs, T, K, 4)
+        else:
+            quatA_cp = rot_cp
 
         limb_joints = [6, 7, 10, 11, 14, 15, 16, 18, 19, 20]
-        delta_quat_shape_norm = self.delta_shape_dec(quatA_norm_cp, shape_encoding_A, shape_encoding_B)
-        delta_quat_shape_norm = torch.reshape(delta_quat_shape_norm, [bs, T, 10, 4])
-        delta_quat_shape = (delta_quat_shape_norm * general_info['quat_std'][:, limb_joints, :] + general_info['quat_mean'][:, limb_joints, :])
-        delta_quat_shape = normalize(delta_quat_shape)
+        rot_dim = 6 if self.use_rot6d else 4
+        delta_norm = self.delta_shape_dec(quatA_norm_cp, shape_encoding_A, shape_encoding_B)
+        delta_norm = torch.reshape(delta_norm, [bs, T, 10, rot_dim])
+        delta = delta_norm * general_info['quat_std'][:, limb_joints, :] + general_info['quat_mean'][:, limb_joints, :]
+        if self.use_rot6d:
+            delta_quat_shape = cont6d_to_quaternion(delta.reshape(-1, 6)).view(bs, T, 10, 4)
+        else:
+            delta_quat_shape = normalize(delta)
         delta_q_shape = (torch.tensor([1, 0, 0, 0], dtype=torch.float32).cuda(device).repeat(bs, T, self.num_joint, 1))
         delta_q_shape[:, :, limb_joints, :] = delta_quat_shape
         quatB_rt = q_mul_q(quatA_cp, delta_q_shape)
 
         refA_fk = tpose_skelA[:, None].repeat(1, T, 1, 1).view(-1, tpose_skelA.shape[-2], tpose_skelA.shape[-1])
         refA_vectors = torch.Tensor([[0, 0, 1]]).repeat(K, 1)[None].repeat(bs*T, 1, 1).cuda()
-        localA, vecA = FK.run_w_vec(general_info['parents'], refA_fk, refA_vectors, quatA_cp.view(-1, quatA_cp.shape[-2], quatA_cp.shape[-1]))
+        localA, vecA = FK.run_w_vec(general_info['parents'], refA_fk, refA_vectors, quatA_cp.view(-1, K, 4))
         localA = localA.view(bs, T, K, -1)
         vecA = vecA.view(bs, T, K, -1)
 
         refB_fk = tpose_skelB[:, None].repeat(1, T, 1, 1).view(-1, tpose_skelB.shape[-2], tpose_skelB.shape[-1])
         refB_vectors = torch.Tensor([[0, 0, 1]]).repeat(K, 1)[None].repeat(bs*T, 1, 1).cuda()
 
-        localB_rt, vecB_rt = FK.run_w_vec(general_info['parents'], refB_fk, refB_vectors, quatB_rt.view(-1, quatB_rt.shape[-2], quatB_rt.shape[-1]))
+        localB_rt, vecB_rt = FK.run_w_vec(general_info['parents'], refB_fk, refB_vectors, quatB_rt.view(-1, K, 4))
         localB_rt = localB_rt.view(bs, T, K, -1)
         vecB_rt = vecB_rt.view(bs, T, K, -1)
 
-        localB_cp, _ = FK.run_w_vec(general_info['parents'], refB_fk, refB_vectors, quatA_cp.view(-1, quatA_cp.shape[-2], quatA_cp.shape[-1]))
+        localB_cp, _ = FK.run_w_vec(general_info['parents'], refB_fk, refB_vectors, quatA_cp.view(-1, K, 4))
         localB_cp = localB_cp.view(bs, T, K, -1)
 
         globalA_vel = seqA_localnorm[:, :, -4:-1]
@@ -344,9 +362,9 @@ def Loss(loss_args, param_dict, full_mesh_info, sample_mesh_info):
     for loss, hyperparam in loss_args.items():
         if hyperparam is not None:
             if 'geometric' in loss:
-                all_losses_dict.update(getattr(importlib.import_module('src.' + os.path.basename(__file__).split('.')[0]), loss)(param_dict, full_mesh_info, sample_mesh_info, hyperparam))
+                all_losses_dict.update(getattr(importlib.import_module('method.' + os.path.basename(__file__).split('.')[0]), loss)(param_dict, full_mesh_info, sample_mesh_info, hyperparam))
             else:
-                all_losses_dict.update(getattr(importlib.import_module('src.' + os.path.basename(__file__).split('.')[0]), loss)(param_dict, hyperparam))
+                all_losses_dict.update(getattr(importlib.import_module('method.' + os.path.basename(__file__).split('.')[0]), loss)(param_dict, hyperparam))
 
     loss = sum(all_losses_dict[key] for key in all_losses_dict)
     return loss, all_losses_dict

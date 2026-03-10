@@ -12,13 +12,13 @@ sys.path.append("./submodules")
 import BVH as BVH
 import Animation as Animation
 
-sys.path.append("./method")
-from utils import get_height
+from method.utils import get_height
+from datasets.utils.quaternion import quaternion_to_cont6d_np
 
 
 class Feeder(Dataset):
     def __init__(
-        self, test_pairs, test_data_path, stats_path, shape_path, min_steps, max_steps, is_h36m=False
+        self, test_pairs, test_data_path, stats_path, shape_path, min_steps, max_steps, is_h36m=False, use_rot6d=False
     ):
         with open(test_pairs, "r") as json_file:
             self.test_pairs = json.load(json_file)
@@ -28,6 +28,7 @@ class Feeder(Dataset):
         self.shape_path = shape_path
         self.min_steps = min_steps
         self.max_steps = max_steps
+        self.use_rot6d = use_rot6d
 
         # save joints list
         self.parents = np.array([-1, 0, 1, 2, 3, 4, 0, 6, 7, 8, 0, 10, 11, 12, 3, 14, 15, 16, 3, 18, 19, 20])
@@ -44,8 +45,9 @@ class Feeder(Dataset):
         self.load_data()
         self.shape_dic = {}
         file_names = listdir(shape_path)
-        self.shape_mean = np.load(join(stats_path, "mixamo_shape_mean_xyz.npy"))
-        self.shape_std = np.load(join(stats_path, "mixamo_shape_std_xyz.npy"))
+        rot_type = 'rot6d' if self.use_rot6d else 'quat'
+        self.shape_mean = np.load(join(stats_path, f"mixamo_{rot_type}_shape_mean_xyz.npy"))
+        self.shape_std = np.load(join(stats_path, f"mixamo_{rot_type}_shape_std_xyz.npy"))
         for shape_name in file_names:
             fbx_file = np.load(join(shape_path, shape_name), allow_pickle=True)
             full_width = fbx_file['full_width'].astype(np.single)
@@ -90,18 +92,22 @@ class Feeder(Dataset):
         self.input_gt = test_data['input_gt']
         self.target_gt = test_data['target_gt']
 
-        self.local_mean = np.load(join(self.stats_path, "mixamo_local_motion_mean.npy"))
-        self.local_std = np.load(join(self.stats_path, "mixamo_local_motion_std.npy"))
-        self.quat_mean = np.load(join(self.stats_path, "mixamo_quat_mean.npy"))
-        self.quat_std = np.load(join(self.stats_path, "mixamo_quat_std.npy"))
-        self.global_mean = np.load(join(self.stats_path, "mixamo_global_motion_mean.npy"))
-        self.global_std = np.load(join(self.stats_path, "mixamo_global_motion_std.npy"))
+        rot_type = 'rot6d' if self.use_rot6d else 'quat'
+        self.local_mean = np.load(join(self.stats_path, f"mixamo_{rot_type}_local_motion_mean.npy"))
+        self.local_std = np.load(join(self.stats_path, f"mixamo_{rot_type}_local_motion_std.npy"))
+        self.quat_mean = np.load(join(self.stats_path, f"mixamo_{rot_type}_mean.npy"))
+        self.quat_std = np.load(join(self.stats_path, f"mixamo_{rot_type}_std.npy"))
+        self.global_mean = np.load(join(self.stats_path, f"mixamo_{rot_type}_global_motion_mean.npy"))
+        self.global_std = np.load(join(self.stats_path, f"mixamo_{rot_type}_global_motion_std.npy"))
         self.local_std[self.local_std == 0] = 1
 
         for i in range(len(self.testlocal_norm)):
             self.testlocal_norm[i] = (self.testlocal_norm[i] - self.local_mean) / self.local_std
             self.testskel_norm[i] = (self.testskel_norm[i] - self.local_mean) / self.local_std
             self.inpskel_norm[i] = (self.inpskel_norm[i] - self.local_mean) / self.local_std
+            if self.use_rot6d:
+                self.input_quat_norm[i] = quaternion_to_cont6d_np(self.input_quat_norm[i])
+                self.target_quat_norm[i] = quaternion_to_cont6d_np(self.target_quat_norm[i])
             self.input_quat_norm[i] = (self.input_quat_norm[i] - self.quat_mean) / self.quat_std
             self.target_quat_norm[i] = (self.target_quat_norm[i] - self.quat_mean) / self.quat_std
 

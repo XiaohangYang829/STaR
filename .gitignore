@@ -209,9 +209,15 @@ __marimo__/
 
 # ours
 datasets/mixamo/
+datasets/HumanML3D/
 datasets/other_dataset/
 .vscode/
 submodules/ChamferDistancePytorch/tmp/
 render_dir/paper_version/ours/
 render_dir/paper_version/copy/
 render_dir/paper_version/source/
+CLAUDE.md
+wandb/
+work_dir/*train*/
+*.sh
+*.o[0-9]*

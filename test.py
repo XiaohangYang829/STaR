@@ -35,6 +35,7 @@ from method.metric import penetrate_1, curvature_1
 def get_parser():
     parser = argparse.ArgumentParser(description='motion retargeting')
     parser.add_argument('--config', default='./config/config.yaml', help='path to the configuration file')
+    parser.add_argument('--debug', action='store_true', help='set num_workers=0 in DataLoaders (avoids stucking on local machines)')
     return parser
 
 
@@ -106,20 +107,23 @@ def test(
         scale_factor = 0.007
         nameA_lst = [name.split('_', 1)[-1] for name in source_name]
         nameB_lst = [name.split('_', 1)[-1] for name in target_name]
-        pointsA = [
-            random_point_select_torch(torch.Tensor(full_mesh_info['rest_vertices'][name]).cuda()) - \
-            full_mesh_info['scale_info'][name]['centroid'] for name in nameA_lst
-        ]
-        sampling_pointsA = torch.cat(pointsA, dim=0) * scale_factor
-        sampling_pointsA = sampling_pointsA.permute(0, 2, 1)
         pointsB = [
             random_point_select_torch(torch.Tensor(full_mesh_info['rest_vertices'][name]).cuda()) - \
             full_mesh_info['scale_info'][name]['centroid'] for name in nameB_lst
         ]
         sampling_pointsB = torch.cat(pointsB, dim=0) * scale_factor
         sampling_pointsB = sampling_pointsB.permute(0, 2, 1)
-        shape_encoding_A = encoder(sampling_pointsA).detach()
         shape_encoding_B = encoder(sampling_pointsB).detach()
+        if getattr(arg, 'use_source_mesh', True):
+            pointsA = [
+                random_point_select_torch(torch.Tensor(full_mesh_info['rest_vertices'][name]).cuda()) - \
+                full_mesh_info['scale_info'][name]['centroid'] for name in nameA_lst
+            ]
+            sampling_pointsA = torch.cat(pointsA, dim=0) * scale_factor
+            sampling_pointsA = sampling_pointsA.permute(0, 2, 1)
+            shape_encoding_A = encoder(sampling_pointsA).detach()
+        else:
+            shape_encoding_A = torch.zeros_like(shape_encoding_B)
         torch.cuda.empty_cache()
 
         quatB_rt, localB_rt, globalB_rt, quatB_base, localB_base, _, _ = retarget_net(
@@ -438,7 +442,8 @@ def main(arg):
         "parents": torch.from_numpy(test_feeder.parents).cuda(arg.device[0]),
         "all_names": test_feeder.to_name,
     }
-    test_loader = torch.utils.data.DataLoader(dataset=test_feeder, batch_size=arg.test_batch_size, num_workers=8, shuffle=False)
+    nw = 0 if arg.debug else 8
+    test_loader = torch.utils.data.DataLoader(dataset=test_feeder, batch_size=arg.test_batch_size, num_workers=nw, shuffle=False)
 
     encoder = import_str(arg.model_path + '.' + arg.encoding_model)(**arg.encoding_model_args).cuda()
     encoder = nn.DataParallel(encoder, device_ids=arg.device)

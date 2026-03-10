@@ -8,21 +8,12 @@ device: [0]
 seed: 42
 description: This is the inference process of STaR, with rendered videos.
 wandb_tags: ['STaR']
+use_source_mesh: true
 
 euler_order: yzx
 max_length: 60
 num_joints: 22
 margin: 0.3
-
-# inference_scanret_feeder: datasets.inference_feeder_scanret.Feeder
-# inference_scanret_feeder_args:
-#   source_path:
-#   q_path: ./datasets/mixamo/test_q_scanret/
-#   stats_path: ./datasets/mixamo/stats_scanret/
-#   shape_path: ./datasets/mixamo/new_train_shape_uv_scanret/
-#   texture_path: ./datasets/mixamo/texture_datapath/
-#   min_steps: 60
-#   max_steps: 60
 
 inference_feeder: datasets.inference_set.Feeder
 inference_feeder_args:
@@ -34,6 +25,7 @@ inference_feeder_args:
   shape_path: ./datasets/mixamo/test_shape/  # test shapes are more than train shapes, for unseen characters
   min_steps: 120
   max_steps: 120
+  use_rot6d: false  # use 6D rotation repr (rot6d) instead of quaternions; set true when model also uses rot6d
 
 model_path: method.network
 model_name: Retarget_Model
@@ -46,6 +38,7 @@ model_args:
   token_channels: 64
   hidden_channels: 64
   embed_channels: 32
+  use_rot6d: false  # set true when model was trained with rot6d
 
 scale_info_path: ./datasets/mixamo/scale_info/
 hand_vert_num: 200

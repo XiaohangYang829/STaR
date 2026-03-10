@@ -5,16 +5,113 @@ import numpy as np
 import matplotlib.pyplot as plt
 from torch.utils.data import Dataset
 from os import listdir, makedirs
-from os.path import exists, join
+from os.path import exists, join, splitext
 
-sys.path.append("./method")
-from utils import get_height_from_skel
-from forward_kinematics import FK_NP
-from utils import put_in_world
+from method.utils import get_height_from_skel
+from method.forward_kinematics import FK_NP
+from method.utils import put_in_world
+from datasets.utils.quaternion import quaternion_to_cont6d_np
+
+# Mixamo skeleton parent indices (22 joints)
+_MIXAMO_PARENTS = np.array([-1, 0, 1, 2, 3, 4, 0, 6, 7, 8, 0, 10, 11, 12, 3, 14, 15, 16, 3, 18, 19, 20])
+_N_JOINTS = 22
+
+
+def visualize_mixamo_mesh(npz_path: str, save_path: str = './mixamo_mesh.png', debug: bool = False):
+    """
+    Visualise a Mixamo character mesh loaded from a shape .npz file.
+
+    Produces a 2-panel figure:
+      Left  — mesh rendered as a translucent trisurf with skeleton overlay.
+      Right — vertex colour map where each vertex is coloured by its dominant joint.
+
+    Args:
+        npz_path  : path to a shape .npz file (e.g. datasets/mixamo/shape/Mutant.npz)
+        save_path : where to save the PNG (only used when debug=False)
+        debug     : if True, display interactively instead of saving
+    """
+    import matplotlib
+    if debug:
+        matplotlib.use('TkAgg')
+    else:
+        matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+    from mpl_toolkits.mplot3d import Axes3D        # noqa: F401
+    from mpl_toolkits.mplot3d.art3d import Poly3DCollection
+    import matplotlib.cm as cm
+
+    data = np.load(npz_path, allow_pickle=True)
+    v       = data['rest_vertices'].astype(np.float32)    # (V, 3)
+    f       = data['rest_faces'].astype(np.int64)         # (F, 3)
+    offsets = data['skeleton'].astype(np.float32)         # (22, 3) — bone offsets from parent
+    w       = data['skinning_weights'].astype(np.float32) # (V, 22)
+    dominant = np.argmax(w, axis=1)                       # (V,)
+
+    # Convert bone offsets → absolute joint positions by accumulating along parent chain
+    parents = _MIXAMO_PARENTS
+    J = np.zeros_like(offsets)
+    for j in range(_N_JOINTS):
+        p = parents[j]
+        J[j] = offsets[j] if p < 0 else J[p] + offsets[j]
+
+    # Shift both mesh and skeleton so root joint (J[0]) is at origin
+    root_pos = J[0].copy()
+    J = J - root_pos
+
+    v_n = v / 100.0               # normalised vertices
+    J_n = J / 100.0               # normalised joint positions
+
+    cmap = cm.get_cmap('tab20', _N_JOINTS)
+    j_colors = [cmap(j) for j in range(_N_JOINTS)]
+
+    fig = plt.figure(figsize=(16, 8))
+    char_name = npz_path.rsplit('/', 1)[-1].replace('.npz', '')
+    fig.suptitle(f'Mixamo character: {char_name}', fontsize=12)
+
+    # ── Left: mesh + joints ────────────────────────────────────────────────────
+    ax1 = fig.add_subplot(121, projection='3d')
+    step = max(1, len(f) // 2000)
+    tris_xzy = v_n[f[::step]][:, :, [0, 2, 1]]     # X, Z(depth), Y(up)
+    poly = Poly3DCollection(tris_xzy, alpha=0.10, edgecolor='none', facecolor='steelblue')
+    ax1.add_collection3d(poly)
+
+    for j in range(_N_JOINTS):
+        p = parents[j]
+        if p >= 0:
+            ax1.plot([J_n[p, 0], J_n[j, 0]], [J_n[p, 2], J_n[j, 2]], [J_n[p, 1], J_n[j, 1]],
+                     'k-', linewidth=1.5)
+    ax1.scatter(J_n[:, 0], J_n[:, 2], J_n[:, 1],
+                c=[j_colors[j] for j in range(_N_JOINTS)], s=60, zorder=5)
+    for j in range(_N_JOINTS):
+        ax1.text(J_n[j, 0], J_n[j, 2], J_n[j, 1], str(j), fontsize=6)
+
+    ax1.view_init(elev=10, azim=-80)
+    ax1.set_xlim(-1, 1); ax1.set_ylim(-1, 1); ax1.set_zlim(-1, 1)
+    ax1.set_xlabel('X'); ax1.set_ylabel('Z'); ax1.set_zlabel('Y (up)')
+    ax1.set_title(f'T-pose mesh + skeleton (22 joints)')
+
+    # ── Right: dominant-joint vertex colouring ─────────────────────────────────
+    ax2 = fig.add_subplot(122, projection='3d')
+    vc = np.array([j_colors[d] for d in dominant])
+    ax2.scatter(v_n[::4, 0], v_n[::4, 2], v_n[::4, 1],
+                c=vc[::4], s=1, alpha=0.5)
+    ax2.view_init(elev=10, azim=-80)
+    ax2.set_xlim(-1, 1); ax2.set_ylim(-1, 1); ax2.set_zlim(-1, 1)
+    ax2.set_xlabel('X'); ax2.set_ylabel('Z'); ax2.set_zlabel('Y (up)')
+    ax2.set_title('Dominant joint per vertex')
+
+    plt.tight_layout()
+    if debug:
+        plt.show()
+    else:
+        makedirs(save_path.rsplit('/', 1)[0] if '/' in save_path else '.', exist_ok=True)
+        plt.savefig(save_path, dpi=120)
+        plt.close()
+        print(f'[Mixamo visualisation] saved to {save_path}')
 
 
 class Feeder(Dataset):
-    def __init__(self, source_path, train_data_path, q_path, stats_path, shape_path, max_length, is_val=False):
+    def __init__(self, source_path, train_data_path, q_path, stats_path, shape_path, max_length, is_val=False, use_rot6d=False):
         self.source_path = source_path
         self.train_data_path = train_data_path
         self.q_path = q_path
@@ -23,6 +120,7 @@ class Feeder(Dataset):
         self.parents = np.array([-1, 0, 1, 2, 3, 4, 0, 6, 7, 8, 0, 10, 11, 12, 3, 14, 15, 16, 3, 18, 19, 20])
         self.val_ratio = 0.1
         self.is_val = is_val
+        self.use_rot6d = use_rot6d
 
         self.leftarm_bone_lst = np.array([15, 16, 17])      # delete 14 to avoid penetration by LBS
         self.wo_leftarm_bone_lst = np.array([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 18, 19, 20, 21])
@@ -54,6 +152,36 @@ class Feeder(Dataset):
         self.load_data()
 
     def load_data(self):
+        # Derive separate cache paths for quat and rot6d so both can coexist
+        if self.train_data_path is not None and self.use_rot6d:
+            base, ext = splitext(self.train_data_path)
+            cache_path = base + '_rot6d' + ext  # e.g. train_data_rot6d.npy
+        else:
+            cache_path = self.train_data_path
+
+        if cache_path is not None and exists(cache_path):
+            train_data = np.load(cache_path, allow_pickle=True).item()
+            self.train_local_norm = train_data['train_local_norm']
+            self.train_global = train_data['train_global']
+            self.train_skel_norm = train_data['train_skel_norm']
+            self.all_quats_norm = train_data['all_quats_norm']
+            self.local_mean = train_data['local_mean']
+            self.local_std = train_data['local_std']
+            self.quat_mean = train_data['quat_mean']
+            self.quat_std = train_data['quat_std']
+            self.global_mean = train_data['global_mean']
+            self.global_std = train_data['global_std']
+            self.all_names = train_data['all_names']
+            self.seq_names = train_data['seq_names']
+            self.seq_length = train_data['seq_length']
+            self.num_joint = train_data['num_joint']
+            self.T = train_data['T']
+            self.character_mean_dict = train_data['character_mean_dict']
+            self.character_std_dict = train_data['character_std_dict']
+            self.character_keys = self.character_mean_dict.keys()
+            print("Loaded train data from cache: {}".format(cache_path))
+            return
+
         all_local = []
         all_global = []
         all_skel = []
@@ -125,9 +253,17 @@ class Feeder(Dataset):
         local_std = allframes_n_skel.std(axis=0)[None, :]
         global_std = np.concatenate(train_global).std(axis=0)[None, :]
 
-        allframes_quat = np.concatenate(all_quats)
-        quat_mean = allframes_quat.mean(axis=0)[None, :]  # 1 J 4
-        quat_std = allframes_quat.std(axis=0)[None, :]
+        # Convert to rot6d if requested
+        if self.use_rot6d:
+            all_rots = [quaternion_to_cont6d_np(q) for q in all_quats]  # each (T, J, 6)
+        else:
+            all_rots = all_quats  # each (T, J, 4)
+
+        rot_type = 'rot6d' if self.use_rot6d else 'quat'
+        allframes_rot = np.concatenate(all_rots)
+        quat_mean = allframes_rot.mean(axis=0)[None, :]  # 1 J (4 or 6)
+        quat_std = allframes_rot.std(axis=0)[None, :]
+        quat_std[quat_std == 0] = 1
 
         '''Calculate the mean and std for each character'''
         mean_dict = {}
@@ -136,8 +272,8 @@ class Feeder(Dataset):
             if all_names[i] not in mean_dict:
                 mean_dict[all_names[i]] = []
                 std_dict[all_names[i]] = []
-            mean_dict[all_names[i]].append(all_quats[i].mean(axis=0)[None, :])
-            std_dict[all_names[i]].append(all_quats[i].std(axis=0)[None, :])
+            mean_dict[all_names[i]].append(all_rots[i].mean(axis=0)[None, :])
+            std_dict[all_names[i]].append(all_rots[i].std(axis=0)[None, :])
         character_mean_dict = {}
         character_std_dict = {}
         for character in mean_dict.keys():
@@ -150,14 +286,14 @@ class Feeder(Dataset):
         '''Save the data stats'''
         if not exists(self.stats_path):
             makedirs(self.stats_path)
-        np.save(join(self.stats_path, "mixamo_local_motion_mean.npy"), local_mean)
-        np.save(join(self.stats_path, "mixamo_local_motion_std.npy"), local_std)
-        np.save(join(self.stats_path, "mixamo_global_motion_mean.npy"), global_mean)
-        np.save(join(self.stats_path, "mixamo_global_motion_std.npy"), global_std)
-        np.save(join(self.stats_path, "mixamo_shape_mean_xyz.npy"), self.shape_mean)
-        np.save(join(self.stats_path, "mixamo_shape_std_xyz.npy"), self.shape_std)
-        np.save(join(self.stats_path, "mixamo_quat_mean.npy"), quat_mean)
-        np.save(join(self.stats_path, "mixamo_quat_std.npy"), quat_std)
+        np.save(join(self.stats_path, f"mixamo_{rot_type}_local_motion_mean.npy"), local_mean)
+        np.save(join(self.stats_path, f"mixamo_{rot_type}_local_motion_std.npy"), local_std)
+        np.save(join(self.stats_path, f"mixamo_{rot_type}_global_motion_mean.npy"), global_mean)
+        np.save(join(self.stats_path, f"mixamo_{rot_type}_global_motion_std.npy"), global_std)
+        np.save(join(self.stats_path, f"mixamo_{rot_type}_shape_mean_xyz.npy"), self.shape_mean)
+        np.save(join(self.stats_path, f"mixamo_{rot_type}_shape_std_xyz.npy"), self.shape_std)
+        np.save(join(self.stats_path, f"mixamo_{rot_type}_mean.npy"), quat_mean)
+        np.save(join(self.stats_path, f"mixamo_{rot_type}_std.npy"), quat_std)
 
         '''Normalize the data'''
         self.num_joint = all_local[0].shape[-2]
@@ -166,12 +302,12 @@ class Feeder(Dataset):
 
         train_local_norm = train_local.copy()
         train_skel_norm = train_skel.copy()
-        all_quats_norm = all_quats.copy()
+        all_quats_norm = all_rots.copy()
         for i in range(len(train_local)):
             train_local_norm[i] = (train_local[i] - local_mean) / local_std
             train_global[i] = train_global[i]
             train_skel_norm[i] = (train_skel[i] - local_mean) / local_std
-            all_quats_norm[i] = (all_quats[i] - quat_mean) / quat_std
+            all_quats_norm[i] = (all_rots[i] - quat_mean) / quat_std
 
         self.train_local_norm = train_local_norm
         self.train_global = train_global
@@ -186,6 +322,30 @@ class Feeder(Dataset):
         self.seq_names = seq_names
         self.all_quats_norm = all_quats_norm
         self.seq_length = seq_length
+
+        if cache_path is not None:
+            train_data = dict(
+                train_local_norm=train_local_norm,
+                train_global=train_global,
+                train_skel_norm=train_skel_norm,
+                all_quats_norm=all_quats_norm,
+                local_mean=local_mean,
+                local_std=local_std,
+                quat_mean=quat_mean,
+                quat_std=quat_std,
+                global_mean=global_mean,
+                global_std=global_std,
+                all_names=all_names,
+                seq_names=seq_names,
+                seq_length=seq_length,
+                num_joint=self.num_joint,
+                T=self.T,
+                character_mean_dict=character_mean_dict,
+                character_std_dict=character_std_dict,
+                use_rot6d=self.use_rot6d,
+            )
+            np.save(cache_path, train_data)
+            print("Saved train data cache to: {}".format(cache_path))
 
     def __len__(self):
         if self.is_val:
@@ -208,9 +368,9 @@ class Feeder(Dataset):
         n_joints = local_norm_i.shape[1]
         max_len = self.max_length
 
-        temporal_mask = torch.zeros((max_len,), dtype=torch.float32)
-        heightA = torch.zeros((1,), dtype=torch.float32)
-        heightB = torch.zeros((1,), dtype=torch.float32)
+        temporal_mask = np.zeros((max_len,), dtype=np.float32)
+        heightA = np.zeros((1,), dtype=np.float32)
+        heightB = np.zeros((1,), dtype=np.float32)
 
         low = 0
         high = local_norm_i.shape[0] - max_len
@@ -220,7 +380,6 @@ class Feeder(Dataset):
             stidx = np.random.randint(low=low, high=high)
 
         # ---------------------------------- Character A ----------------------------------------------------
-
         cropped_localA_norm = local_norm_i[stidx : (stidx + max_len)]
         temporal_mask[: np.min([max_len, cropped_localA_norm.shape[0]])] = 1.0
         # add zeros if the length is shorter than max length (60)
@@ -234,10 +393,11 @@ class Feeder(Dataset):
             cropped_skelA_norm = np.concatenate((cropped_skelA_norm, np.zeros((max_len - cropped_skelA_norm.shape[0], n_joints, 3))))
         cropped_quatA_norm = quat_norm_i[stidx : (stidx + max_len)]
         if cropped_quatA_norm.shape[0] < max_len:
-            # zeros for quaternions is (1,0,0,0)
-            zeros = np.zeros((max_len - cropped_quatA_norm.shape[0], n_joints, 4))
-            zeros[:, :, 0] = 1.0
-            cropped_quatA_norm = np.concatenate((cropped_quatA_norm, zeros))
+            rot_dim = 6 if self.use_rot6d else 4
+            pad = np.zeros((max_len - cropped_quatA_norm.shape[0], n_joints, rot_dim))
+            if not self.use_rot6d:
+                pad[:, :, 0] = 1.0  # identity quaternion (1,0,0,0)
+            cropped_quatA_norm = np.concatenate((cropped_quatA_norm, pad))
 
         # ---------------------------------- Character B ----------------------------------------------------
         indexB = np.random.randint(len(self.train_skel_norm))
@@ -281,6 +441,20 @@ class Feeder(Dataset):
         shapeA = self.shape_dic[self.all_names[indexA]].reshape(-1)
         shapeB = self.shape_dic[self.all_names[indexB]].reshape(-1)
 
+        if False:
+            # quatA should be unit quaternions (raw, NOT normalized) — shape (T, J, 4)
+            from datasets.utils.quaternion import cont6d_to_quaternion
+            quatA = quatA_norm * self.quat_std + self.quat_mean
+            quatA_6d = quaternion_to_cont6d_np(quatA)                          # (T, J, 6) numpy
+            quatA_rt = cont6d_to_quaternion(torch.from_numpy(quatA_6d).float()) # (T, J, 4) torch
+            quatA_rt = quatA_rt.numpy()
+            # handle double-cover: q and -q are the same rotation
+            signs = np.sign((quatA * quatA_rt).sum(axis=-1, keepdims=True))
+            quatA_rt_aligned = quatA_rt * signs
+            err = np.abs(quatA - quatA_rt_aligned).max()
+            print(f"Round-trip max error: {err:.2e}")  # should be ~1e-6 or less
+            assert err < 1e-4, f"Round-trip error too large: {err}"
+
         return (
             indexA,
             indexB,
@@ -295,3 +469,18 @@ class Feeder(Dataset):
             shapeB,
             quatA_norm,
         )
+
+
+if __name__ == '__main__':
+    import argparse
+    p = argparse.ArgumentParser()
+    p.add_argument('--npz', required=True, help='path to a shape .npz file, e.g. datasets/mixamo/shape/Mutant.npz')
+    p.add_argument('--save', default='./mixamo_mesh.png')
+    p.add_argument('--debug', action='store_true', help='show interactively instead of saving')
+    args = p.parse_args()
+
+    data = np.load(args.npz, allow_pickle=True)
+    print(f'Keys: {list(data.keys())}')
+    print(f'Vertices: {data["rest_vertices"].shape}  Faces: {data["rest_faces"].shape}  '
+          f'Weights: {data["skinning_weights"].shape}  Skeleton: {data["skeleton"].shape}')
+    visualize_mixamo_mesh(args.npz, save_path=args.save, debug=args.debug)

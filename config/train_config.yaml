@@ -7,7 +7,9 @@ device: [0]
 seed: 42
 description: This is the training process of STaR.
 wandb_tags: ['STaR']
+use_source_mesh: true
 
+alpha: 100
 euler_order: yzx
 max_length: 60
 num_joints: 22
@@ -19,17 +21,19 @@ train_set_args:
   train_data_path: ./datasets/mixamo/train/train_data.npy  # simple version
   q_path: ./datasets/mixamo/train/train_q/
   stats_path: ./datasets/mixamo/stats/  # will calculate the stats, which will be used for test / inference
-  shape_path: ./datasets/mixamo/new_train_shape/
+  shape_path: ./datasets/mixamo/shape/
   max_length: 60
+  use_rot6d: &use_rot6d false  # change here only — test_set_args will follow automatically
 
 test_set: datasets.test_set.Feeder
 test_set_args:
-  test_pairs: ./datasets/mixamo/test.json
-  test_data_path: ./datasets/mixamo/test_data.npy
+  test_pairs: ./datasets/mixamo/test/test.json
+  test_data_path: ./datasets/mixamo/test/test_data.npy
   stats_path: ./datasets/mixamo/stats/
   shape_path: ./datasets/mixamo/test_shape/
   min_steps: 120
   max_steps: 120
+  use_rot6d: *use_rot6d
 
 model_path: method.network
 model_name: Retarget_Model
@@ -42,6 +46,7 @@ model_args:
   token_channels: 64
   hidden_channels: 64
   embed_channels: 32
+  use_rot6d: *use_rot6d  # follows train_set_args.use_rot6d
 
 loss_function: Loss
 loss_args:
@@ -70,6 +75,9 @@ encoding_model_weights: datasets/mixamo/encoding_model_weights/model.t7
 epoch: 50
 global_epoch: 50
 save_epoch: 5
+balance_alpha: 0.02  # score = pen_rate + alpha * curv_diff; pen_rate~0.01-0.10, curv_diff~0.5-5.0 m/s^2
+                     # calibrate alpha from first valid-2.txt: alpha = pen_rate / curv_diff
+patience: 0          # early stopping: # val checks with no improvement (val runs every 2 epochs, 0=disabled)
 step: [30]
 global_step: [30]
 base_lr: 0.001

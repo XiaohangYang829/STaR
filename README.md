@@ -8,7 +8,7 @@ Neural motion retargeting model, STaR, is designed for a balance between: (1) mo
 
 - [x] test code, with network weight and a processed test set;
 - [x] inference code, with a PyTorch3D-based rendering function;
-- [x] data preparation;
+- [x] data preparation process & pre-processed data;
 - [ ] release a skel2mesh motion retargeting sub-model based on STaR, which can be used for retargeting motion generation results to new characters;
 
 ![Architecture Details](assets/detail_dark.png)
@@ -46,7 +46,7 @@ pip install ./pointnet2_ops_lib/.
 
 ### The Easy Way
 
-Download the processed test / inference set from [here](https://drive.google.com/drive/folders/1DFx-JhjPzE4njujtRWxGRSfl2m0NFU8f?usp=drive_link). Put all content under ```./datasets/mixamo/```.
+Download the processed train / test / inference set from [here](https://drive.google.com/drive/folders/1DFx-JhjPzE4njujtRWxGRSfl2m0NFU8f?usp=drive_link). Put all content under ```./datasets/mixamo/```.
 
 This will take more space.
 
@@ -175,13 +175,23 @@ Thanks to all of them.
 
 ## Citation
 If you find this work helpful, please consider citing it as follows:
-```   
-@InProceedings{Yang_2025_STaR,
-    author    = {Yang, Xiaohang and Wang, Qing and Yang, Jiahao and Slabaugh, Gregory and Yuan, Shanxin},
-    title     = {STaR: Seamless Spatial-Temporal Aware Motion Retargeting with Penetration and Consistency Constraints},
-    booktitle = {Proceedings of the IEEE/CVF International Conference on Computer Vision (ICCV)},
-    month     = {Oct},
-    year      = {2025}
-}
-
 ```
+@inproceedings{yang2025star,
+  title={STaR: Seamless Spatial-Temporal Aware Motion Retargeting with Penetration and Consistency Constraints},
+  author={Yang, Xiaohang and Wang, Qing and Yang, Jiahao and Slabaugh, Gregory and Yuan, Shanxin},
+  booktitle={Proceedings of the IEEE/CVF International Conference on Computer Vision},
+  pages={12947--12955},
+  year={2025}
+}
+```
+Or
+```
+@article{yang2025star,
+  title={STaR: Seamless Spatial-Temporal Aware Motion Retargeting with Penetration and Consistency Constraints},
+  author={Yang, Xiaohang and Wang, Qing and Yang, Jiahao and Slabaugh, Gregory and Yuan, Shanxin},
+  journal={arXiv e-prints},
+  pages={arXiv--2504},
+  year={2025}
+}
+```
+
