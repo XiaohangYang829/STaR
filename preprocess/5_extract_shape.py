@@ -1,7 +1,3 @@
-# import debugpy
-# debugpy.listen(5678)
-# debugpy.wait_for_client()
-
 import os
 import bpy
 import bmesh
@@ -26,7 +22,6 @@ def rm_prefix(str):
 def get_width(vertices):
     # vertices: (num_joint, 3)
     box = np.zeros((2, 3))
-    # pdb.set_trace()
     box[0, :] = vertices.min(axis=0)
     box[1, :] = vertices.max(axis=0)
     width = box[1, :] - box[0, :]
@@ -34,14 +29,17 @@ def get_width(vertices):
 
 
 '''22 joints mixamo'''
+# left and right might be wrong
 body_joint_lst = [0, 1, 2, 3]
+head_joint_lst = [4, 5]
 right_arm_joint_lst = [14, 15, 16, 17]
 left_arm_joint_lst = [18, 19, 20, 21]
+right_leg_joint_lst = [6, 7, 8, 9]
+left_leg_joint_lst = [10, 11, 12, 13]
 arms_joint_lst = right_arm_joint_lst + left_arm_joint_lst
 
 
 def extract_data(fbx_path, subject_name, save_path):
-    print('loading fbx from file: {}'.format(fbx_path))
     bpy.ops.import_scene.fbx(filepath=fbx_path, use_anim=True)
     context = bpy.context
     scene = context.scene
@@ -55,9 +53,10 @@ def extract_data(fbx_path, subject_name, save_path):
         0
     ].head_local  # the location of hips under rest pose
     # rest_x, rest_y, rest_z = 0, 0, 0
+    most_verts = 0
     for obj in scene.objects:
-        print(obj.type, obj.name)
-        if obj.type == 'MESH' and not obj.name == 'Cube' and 'Body' in obj.name:
+        # find the mesh with most vertexes
+        if obj.type == 'MESH' and not obj.name == 'Cube':
             bme_rest = bmesh.new()
             bme_rest.from_mesh(obj.data)
 
@@ -71,23 +70,43 @@ def extract_data(fbx_path, subject_name, save_path):
             )['faces']
 
             rest_verts_lst = []
+            rest_verts_normal_lst = []
             for v in bm_rest_verts:
                 rest_verts_lst.append(
                     (v.co.x - rest_x, v.co.y - rest_y, v.co.z - rest_z)
                 )
+                rest_verts_normal_lst.append(np.array(v.normal))
+            
+            # pdb.set_trace()
 
-            rest_faces_lst = (
-                []
-            )  # estimated in each frame, therefore the faces may change
+            rest_faces_lst = ([])  # estimated in each frame, therefore the faces may change
             for face in bm_rest_faces_tri:
                 f_verts = face.verts
                 rest_faces_lst.append(
                     (f_verts[0].index, f_verts[1].index, f_verts[2].index)
                 )
 
-            np_rest_verts = np.array(rest_verts_lst)
-            np_rest_faces = np.array(rest_faces_lst)
-            print(obj.type, obj.name, np_rest_verts.shape, np_rest_faces.shape)
+            if len(rest_verts_lst) > most_verts:
+                np_rest_verts = np.array(rest_verts_lst)
+                np_rest_vert_normals = np.array(rest_verts_normal_lst)
+                np_rest_faces = np.array(rest_faces_lst)
+                most_verts = np_rest_verts.shape[0]
+                print(obj, np_rest_verts.shape)
+                verts = obj.data.vertices
+                vgrps = obj.vertex_groups  # vertex groups correspond to the joints.
+                np_skinning_weights = np.zeros((len(verts), len(vgrps)))
+                mask = np.zeros(np_skinning_weights.shape, dtype=np.int32)
+                vgrp_label = vgrps.keys()
+
+                # pdb.set_trace()
+                for i, vert in enumerate(verts):
+                    for g in vert.groups:
+                        j = g.group
+                        np_skinning_weights[i, j] = g.weight
+                        mask[i, j] = 1
+
+        if obj.type == 'ARMATURE':
+            source_arm = bpy.data.objects[obj.name]
 
     # obtain the frame indices of begining and ending
     bpy.context.object.data.pose_position = 'POSE'
@@ -105,28 +124,6 @@ def extract_data(fbx_path, subject_name, save_path):
     )
 
     bvh_data = BVHData(output_bvh_path)
-
-    # ====== extract data block ======
-    # extract skinning weight and simplify it
-    for obj in scene.objects:
-        print(obj.type, obj.name)
-        if obj.type == 'MESH' and not obj.name == 'Cube' and 'Body' in obj.name:
-            verts = obj.data.vertices
-            vgrps = obj.vertex_groups  # vertex groups correspond to the joints.
-
-            np_skinning_weights = np.zeros((len(verts), len(vgrps)))
-            mask = np.zeros(np_skinning_weights.shape, dtype=np.int)
-            vgrp_label = vgrps.keys()
-
-            for i, vert in enumerate(verts):
-                for g in vert.groups:
-                    j = g.group
-                    np_skinning_weights[i, j] = g.weight
-                    mask[i, j] = 1
-            print(obj.type, obj.name, len(verts), len(vgrps), len(vgrp_label))
-
-        if obj.type == 'ARMATURE':
-            source_arm = bpy.data.objects[obj.name]
 
     np_simplified_skinning_weights = np.zeros(
         (len(verts), len(bvh_data.simplified_joint_names))
@@ -151,16 +148,38 @@ def extract_data(fbx_path, subject_name, save_path):
     face_part = np.array(face_part)
     body_vid_lst = []
     arm_vid_lst = []
+    left_arm_vid_lst = []
+    right_arm_vid_lst = []
+    left_leg_vid_lst = []
+    right_leg_vid_lst = []
     for i in range(vertex_part.shape[0]):
         if vertex_part[i] in body_joint_lst:
             body_vid_lst.append(i)
         if vertex_part[i] in arms_joint_lst:
             arm_vid_lst.append(i)
+        if vertex_part[i] in left_arm_joint_lst:
+            left_arm_vid_lst.append(i)
+        if vertex_part[i] in right_arm_joint_lst:
+            right_arm_vid_lst.append(i)
+        if vertex_part[i] in left_leg_joint_lst:
+            left_leg_vid_lst.append(i)
+        if vertex_part[i] in right_leg_joint_lst:
+            right_leg_vid_lst.append(i)
 
     rest_body_vertices = np_rest_verts[body_vid_lst, :]
     rest_arm_vertices = np_rest_verts[arm_vid_lst, :]
+    rest_left_arm_vertices = np_rest_verts[left_arm_vid_lst, :]
+    rest_right_arm_vertices = np_rest_verts[right_arm_vid_lst, :]
+    rest_left_leg_vertices = np_rest_verts[left_leg_vid_lst, :]
+    rest_right_leg_vertices = np_rest_verts[right_leg_vid_lst, :]
 
-    print(rest_body_vertices.shape)
+    rest_body_vertice_normals = np_rest_vert_normals[body_vid_lst, :]
+    rest_arm_vertice_normals = np_rest_vert_normals[arm_vid_lst, :]
+    rest_left_arm_vertice_normals = np_rest_vert_normals[left_arm_vid_lst, :]
+    rest_right_arm_vertice_normals = np_rest_vert_normals[right_arm_vid_lst, :]
+    rest_left_leg_vertice_normals = np_rest_vert_normals[left_leg_vid_lst, :]
+    rest_right_leg_vertice_normals = np_rest_vert_normals[right_leg_vid_lst, :]
+
     body_width = get_width(rest_body_vertices)
     full_width = get_width(np_rest_verts)
 
@@ -188,38 +207,74 @@ def extract_data(fbx_path, subject_name, save_path):
     joint_names_data = bvh_data.simplified_joint_names
     root_orient_data = bvh_data.simplified_axis_angle[:, :3].astype(np.single)
     rest_vertices_data = np_rest_verts.astype(np.single)
+    rest_vertice_normals_data = np_rest_vert_normals
     rest_faces_data = np_rest_faces
     subject_data = subject_name
     skeleton_data = bvh_data.simplified_joint_offsets.astype(np.single)
+
     rest_body_vertices_data = rest_body_vertices
     rest_arm_vertices_data = rest_arm_vertices
+    rest_left_arm_vertices_data = rest_left_arm_vertices
+    rest_right_arm_vertices_data = rest_right_arm_vertices
+    rest_left_leg_vertices_data = rest_left_leg_vertices
+    rest_right_leg_vertices_data = rest_right_leg_vertices
+
+    rest_body_vertice_normals_data = rest_body_vertice_normals
+    rest_arm_vertice_normals_data = rest_arm_vertice_normals
+    rest_left_arm_vertice_normals_data = rest_left_arm_vertice_normals
+    rest_right_arm_vertice_normals_data = rest_right_arm_vertice_normals
+    rest_left_leg_vertice_normals_data = rest_left_leg_vertice_normals
+    rest_right_leg_vertice_normals_data = rest_right_leg_vertice_normals
 
     output_root = save_path
     output_path = os.path.join(output_root, '%s.npz' % (subject_name))
 
+    pdb.set_trace()
+    print(subject_data, ', vertex number:', skinning_weights_data.shape[0])
     np.savez(
         output_path,
         skinning_weights=skinning_weights_data,
         joint_names=joint_names_data,
         root_orient=root_orient_data,
         rest_vertices=rest_vertices_data,
+        rest_vertex_normals=rest_vertice_normals_data,
         rest_faces=rest_faces_data,
         skeleton=skeleton_data,
         subject=subject_data,
         vertex_part=vertex_part,
+
         rest_body_vertices=rest_body_vertices_data,
         rest_arm_vertices=rest_arm_vertices_data,
+        rest_left_arm_vertices=rest_left_arm_vertices_data,
+        rest_right_arm_vertices=rest_right_arm_vertices_data,
+        rest_left_leg_vertices=rest_left_leg_vertices_data,
+        rest_right_leg_vertices=rest_right_leg_vertices_data,
+
+        rest_body_vertice_normals=rest_body_vertice_normals_data,
+        rest_arm_vertice_normals=rest_arm_vertice_normals_data,
+        rest_left_arm_vertice_normals=rest_left_arm_vertice_normals_data,
+        rest_right_arm_vertice_normals=rest_right_arm_vertice_normals_data,
+        rest_left_leg_vertice_normals=rest_left_leg_vertice_normals_data,
+        rest_right_leg_vertice_normals=rest_right_leg_vertice_normals_data,
+
         body_width=body_width,
         full_width=full_width,
         joint_shape=shape_lst_array,
     )
 
+    # for obj in bpy.context.scene.objects:
+    #     obj.select = True
     bpy.ops.object.delete()
 
 
 if __name__ == '__main__':
-    subject_name = 'Claire'
-    fbx_path = './Claire_Tpose.fbx'
+    root_path = "./fbx_datapath"
+    fbx_name_lst = listdir(root_path)
+    fbx_name_lst.sort()
 
-    save_path = './char_shape'
-    extract_data(fbx_path, subject_name, save_path)
+    # pdb.set_trace()
+    for fbx_name in tqdm(fbx_name_lst):
+        subject_name = fbx_name.split(".")[0]
+        fbx_path = join(root_path, fbx_name)
+        save_path = "./npz_datapath"
+        extract_data(fbx_path, subject_name, save_path)
