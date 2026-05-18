@@ -6,7 +6,7 @@ import sys
 
 sys.path.append(".")
 
-from bvh import BVHData
+from datasets.bvh import BVHData
 from os import listdir, makedirs
 from os.path import exists, join
 from tqdm import tqdm
