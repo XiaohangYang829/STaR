@@ -6,7 +6,7 @@ import sys
 
 sys.path.append(".")
 
-from datasets.bvh import BVHData
+from preprocess.bvh import BVHData
 from os import listdir, makedirs
 from os.path import exists, join
 from tqdm import tqdm
@@ -77,8 +77,6 @@ def extract_data(fbx_path, subject_name, save_path):
                 )
                 rest_verts_normal_lst.append(np.array(v.normal))
             
-            # pdb.set_trace()
-
             rest_faces_lst = ([])  # estimated in each frame, therefore the faces may change
             for face in bm_rest_faces_tri:
                 f_verts = face.verts
@@ -98,7 +96,6 @@ def extract_data(fbx_path, subject_name, save_path):
                 mask = np.zeros(np_skinning_weights.shape, dtype=np.int32)
                 vgrp_label = vgrps.keys()
 
-                # pdb.set_trace()
                 for i, vert in enumerate(verts):
                     for g in vert.groups:
                         j = g.group
@@ -229,7 +226,6 @@ def extract_data(fbx_path, subject_name, save_path):
     output_root = save_path
     output_path = os.path.join(output_root, '%s.npz' % (subject_name))
 
-    pdb.set_trace()
     print(subject_data, ', vertex number:', skinning_weights_data.shape[0])
     np.savez(
         output_path,
@@ -264,17 +260,18 @@ def extract_data(fbx_path, subject_name, save_path):
 
     # for obj in bpy.context.scene.objects:
     #     obj.select = True
+
+    # bpy.ops.object.select_all(action='SELECT')
     bpy.ops.object.delete()
 
 
 if __name__ == '__main__':
-    root_path = "./fbx_datapath"
+    root_path = "./fbx_datapath" # change this to the path of the fbx files
     fbx_name_lst = listdir(root_path)
     fbx_name_lst.sort()
 
-    # pdb.set_trace()
     for fbx_name in tqdm(fbx_name_lst):
         subject_name = fbx_name.split(".")[0]
         fbx_path = join(root_path, fbx_name)
-        save_path = "./npz_datapath"
+        save_path = "./npz_datapath" # change this to the path of the npz files
         extract_data(fbx_path, subject_name, save_path)

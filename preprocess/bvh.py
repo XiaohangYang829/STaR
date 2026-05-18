@@ -11,8 +11,6 @@ import BVH as BVH
 from Animation import Animation
 from Quaternions import Quaternions
 
-import pdb
-
 channelmap = {'Xrotation': 'x', 'Yrotation': 'y', 'Zrotation': 'z'}
 
 channelmap_inv = {
